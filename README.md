@@ -127,9 +127,9 @@ GSBWifiOtomatik.cs   Uygulamanın tamamı (C#, Windows Forms, Chrome DevTools Pr
 build.bat            Derleme betiği
 app.manifest         Yönetici izni isteği
 assets/
-  logo.png           Logo
-  app.ico            Uygulama simgesi (16–256 px)
-  icon-uret.ps1      Logoyu ve simgeyi üreten betik
+  logo.svg           Logo (kaynak)
+  logo.png           Logo (512 px)
+  app.ico            Uygulama simgesi (16–256 px, logodan üretilir)
 ```
 
 ## Lisans
