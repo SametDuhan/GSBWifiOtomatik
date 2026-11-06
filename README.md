@@ -5,7 +5,7 @@
 <h1 align="center">GSBWIFI Otomatik Bağlantı</h1>
 
 <p align="center">
-  Windows'ta GSBWIFI "<b>İnternet yok, açık</b>" hatası verdiğinde, Wi-Fi'ı kapatıp açma işini senin yerine yapan küçük masaüstü uygulaması.
+  Windows'ta GSBWIFI "<b>İnternet yok, açık</b>" hatası verdiğinde Wi-Fi'ı kapatıp açan, giriş sayfasını Chrome'da açıp <b>Giriş</b>'e basan masaüstü uygulaması. İstersen sağ altta canlı görünümünü ikinci bir imleçle izlersin.
 </p>
 
 ---
@@ -20,14 +20,20 @@ GSBWIFI'ye bağlanırken Windows sık sık şunu gösteriyor:
 
 ## Ne yapar?
 
-1. Uygulamayı açarsın. Hemen çalışmaya başlar.
-2. 4 saniyede bir **gerçek internet var mı** diye bakar. Bunun için Microsoft'un bağlantı test adresini (`msftconnecttest.com`) kullanır. Windows'un "İnternet yok" kararını verirken baktığı kaynakla aynıdır.
+1. Uygulamayı **sen açınca** çalışmaya başlar. Windows ile birlikte kendiliğinden başlamaz.
+2. 4 saniyede bir **gerçek internet var mı** diye bakar (`msftconnecttest.com`, Windows'un kendi kullandığı kaynak).
 3. GSBWIFI'ye bağlı değilsen bağlanmayı dener.
-   Bağlıysan ve internet yoksa önce **giriş sayfasını** (`wifi.gsb.gov.tr`) kontrol eder. Sayfa açılıyorsa kayıtlı bilgilerinle girişi senin yerine yapar.
-4. Bağlısın ama internet yoksa yaklaşık 12 saniye bekler. Hâlâ yoksa bağlantıyı kesip yeniden bağlanır. Bunun yerine her denemede **Wi-Fi kartını kapatıp açar** (senin Wi-Fi anahtarını kapatıp açmana denk gelir). İnternet gelene kadar bunu tekrarlar.
-5. **İnternet gelince** bildirim gösterir ve kendini kapatır.
+4. Bağlısın ama internet yoksa **giriş sayfasını (`wifi.gsb.gov.tr`) arka planda Chrome ile açar**. Sayfa açılırsa kullanıcı adı ve şifreyi yazar, **Giriş** düğmesine tıklar.
+5. Sayfa açılmazsa ya da giriş sonrası internet gelmezse **Wi-Fi kartını kapatıp açar**, yeniden bağlanır ve giriş sayfası açılana kadar bunu tekrarlar.
+6. **İnternet gelince** bildirim gösterir, birkaç saniye sonra kendini kapatır.
 
-Pencerede anlık durum ve işlem kaydı görünür. **Arka plana al** ile görev çubuğu simgesine iner, simgeye çift tıklayınca geri gelir. **Durdur** ile döngüyü elle durdurabilirsin.
+Chrome bulunamazsa Edge, o da yoksa doğrudan form gönderimi denenir.
+
+## Arayüz
+
+- **Solda:** Başlat / Durdur, **Görüntü** anahtarı, giriş bilgileri, arka plana alma.
+- **Ortada:** o an ne olduğu (büyük durum, dört adımlı ilerleme çizgisi, deneme / Wi-Fi yenileme / süre sayaçları) ve altında kayıt.
+- **Görüntü açıkken (sağ altta):** uygulamanın bağlanmaya çalışırken Chrome'da yaptığı her şey canlı görünür. Sayfa, yazılan alanlar ve tıklamalar **ikinci, pembe bir sanal imleçle** gösterilir. Senin gerçek farene dokunulmaz, o pencere tıklanamaz ve odağı çalmaz. Anahtar durumu hatırlanır.
 
 ## Kullanım
 
@@ -69,21 +75,19 @@ build.bat
 |---|---|---|
 | `Ssid` | `GSBWIFI` | Bağlanılacak ağın adı |
 | `TickMs` | `4000` | Kontrol aralığı (milisaniye) |
-| `FailsToKick` | `3` | Kaç başarısız kontrolden sonra kopar/bağlan yapılacağı |
-| `ResetEvery` | `1` | Kaç denemede bir Wi-Fi kartının kapatıp açılacağı (1 = her denemede, 3 = üç denemede bir, aradakilerde sadece kopar/bağlan) |
 
 Başka bir açık ağda da aynı sorunu yaşıyorsan `Ssid` değerini değiştirip yeniden derlemen yeterli.
 
 ## Sınırlar
 
-- Giriş sayfası değişirse (alan adları, adres) uygulamanın güncellenmesi gerekir. Sayfanın düz bir form olduğu varsayılır, captcha ya da SMS kodu varsa giremez.
+- Giriş sayfası değişirse (alan adları, adres, düğme yazısı) uygulamanın güncellenmesi gerekir. Captcha ya da SMS kodu varsa giremez. Tarayıcı, `%APPDATA%\GSBWifiOtomatik\chrome` altındaki ayrı bir profille çalışır, kendi Chrome'una dokunmaz.
 - Sadece Wi-Fi bağlantısını yönetir. Ağın tarafındaki bir kesintiyi düzeltemez. Ağ kapalıysa döngü sürer, ağ gelince bağlanır.
 - Komutlar Windows'un kendi `netsh wlan` aracı üzerinden çalışır.
 
 ## Proje yapısı
 
 ```
-GSBWifiOtomatik.cs   Uygulamanın tamamı (C#, Windows Forms)
+GSBWifiOtomatik.cs   Uygulamanın tamamı (C#, Windows Forms, Chrome DevTools Protocol)
 build.bat            Derleme betiği
 app.manifest         Yönetici izni isteği
 assets/
