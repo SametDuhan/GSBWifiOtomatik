@@ -388,7 +388,7 @@ class Switch : Control
         using (var p = T.Round(new RectangleF(0.5f, 0.5f, w - 1.5f, h - 1.5f), 11)) using (var b = new SolidBrush(hover ? T.Lighten(T.Card, 8) : T.Card)) using (var pen = new Pen(on ? T.A(T.Accent, 170) : T.Line, 1.2f))
         { g.FillPath(b, p); g.DrawPath(pen, p); }
         T.Tx(g, Text, 10.5f, true, T.Text, 12, 8, w - 70, 20, 0, false, false);
-        T.Tx(g, Sub, 8.75f, false, Color.FromArgb(190, 200, 220), 12, 28, w - 70, 16, 0, false, false);
+        T.Tx(g, Sub, 9.5f, false, Color.FromArgb(218, 225, 240), 12, 29, w - 66, 18, 0, false, false);
         var pill = new RectangleF(w - 52, (h - 22) / 2f, 40, 22);
         using (var p = T.Round(pill, 11))
         {
@@ -704,8 +704,8 @@ class App : Form
         var side = new Panel { Left = 0, Top = 0, Width = 220, Height = 560, BackColor = T.Side };
         var brand = new PictureBox { Left = 20, Top = 22, Width = 44, Height = 44, SizeMode = PictureBoxSizeMode.Zoom, BackColor = T.Side };
         try { brand.Image = new Icon(appIcon, 48, 48).ToBitmap(); } catch { }
-        var brandT = new Label { Left = 72, Top = 24, AutoSize = true, Text = "GSB WiFi", Font = new Font("Segoe UI Semibold", 13.5f), ForeColor = T.Text, BackColor = T.Side };
-        var brandS = new Label { Left = 74, Top = 48, AutoSize = true, Text = "Otomatik bağlantı", Font = new Font("Segoe UI", 8.5f), ForeColor = T.Muted, BackColor = T.Side };
+        var brandT = new Label { Left = 72, Top = 19, AutoSize = true, Text = "GSB WiFi", Font = new Font("Segoe UI Semibold", 13.5f), ForeColor = T.Text, BackColor = T.Side };
+        var brandS = new Label { Left = 74, Top = 49, AutoSize = true, Text = "Otomatik bağlantı", Font = new Font("Segoe UI", 10f), ForeColor = Color.FromArgb(214, 222, 238), BackColor = T.Side };
         btn = new FlatBtn { Left = 20, Top = 100, Width = 180, Height = 50, Text = "Başlat", Fill = T.Green, Fill2 = Color.FromArgb(14, 165, 160), BackColor = T.Side, Font = new Font("Segoe UI Semibold", 12f) };
         var secHead = new Label { Left = 22, Top = 176, AutoSize = true, Text = "SEÇENEKLER", Font = new Font("Segoe UI Semibold", 8f), ForeColor = T.Muted, BackColor = T.Side };
         swView = new Switch { Left = 20, Top = 198, Width = 180, Height = 54, Text = "Görüntü", Sub = "İkinci imleci göster", BackColor = T.Side };
@@ -713,9 +713,9 @@ class App : Form
         btnHide = new FlatBtn { Left = 20, Top = 492, Width = 180, Height = 40, Text = "Arka plana al", Ghost = true, BackColor = T.Side };
         side.Controls.AddRange(new Control[] { brand, brandT, brandS, btn, secHead, swView, btnCred, btnHide });
 
-        card = new Card(this) { Left = 244, Top = 24, Width = 532, Height = 252, BackColor = T.Bg };
-        logHead = new Label { Left = 246, Top = 292, AutoSize = true, Text = "KAYIT", Font = new Font("Segoe UI Semibold", 8f), ForeColor = T.Muted, BackColor = T.Bg };
-        var logHost = new Panel { Left = 244, Top = 314, Width = 532, Height = 222, BackColor = T.Card, Padding = new Padding(14, 12, 10, 10) };
+        card = new Card(this) { Left = 244, Top = 24, Width = 532, Height = 276, BackColor = T.Bg };
+        logHead = new Label { Left = 246, Top = 312, AutoSize = true, Text = "KAYIT", Font = new Font("Segoe UI Semibold", 8f), ForeColor = T.Muted, BackColor = T.Bg };
+        var logHost = new Panel { Left = 244, Top = 334, Width = 532, Height = 204, BackColor = T.Card, Padding = new Padding(14, 12, 10, 10) };
         logHost.Resize += (s, e) => { using (var p = T.Round(new RectangleF(0, 0, logHost.Width, logHost.Height), 14)) logHost.Region = new Region(p); };
         box = new RichTextBox { Dock = DockStyle.Fill, ReadOnly = true, DetectUrls = false, ScrollBars = RichTextBoxScrollBars.Vertical, BorderStyle = BorderStyle.None, BackColor = T.Card, ForeColor = Color.FromArgb(190, 200, 220), Font = new Font("Consolas", 9.5f) };
         logHost.Controls.Add(box);
@@ -977,14 +977,14 @@ class App : Form
         float gap = 10, bw = (sz.Width - 48 - gap * 2) / 3f;
         for (int i = 0; i < 3; i++)
         {
-            var box = new RectangleF(24 + (bw + gap) * i, 203, bw, 41);
+            var box = new RectangleF(24 + (bw + gap) * i, 204, bw, 58);
             using (var p = T.Round(box, 10))
             {
                 using (var b = new SolidBrush(Color.FromArgb(150, 10, 15, 28))) g.FillPath(b, p);
                 using (var pen = new Pen(Color.FromArgb(120, 70, 86, 120), 1.2f)) g.DrawPath(pen, p);
             }
-            T.Tx(g, lab[i], 8f, true, Color.FromArgb(185, 196, 218), box.X + 14, box.Y + 5, bw - 20, 14, 0, false, false);
-            T.Tx(g, val[i], 13f, true, T.Text, box.X + 14, box.Y + 18, bw - 20, 22, 0, false, false);
+            T.Tx(g, lab[i], 9.5f, true, Color.FromArgb(212, 220, 238), box.X + 14, box.Y + 8, bw - 20, 17, 0, false, false);
+            T.Tx(g, val[i], 15f, true, T.Text, box.X + 14, box.Y + 26, bw - 20, 26, 0, false, false);
         }
     }
 
