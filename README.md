@@ -52,7 +52,7 @@ Chrome bulunamazsa Edge, o da yoksa doğrudan form gönderimi denenir.
 
 - Windows 10 / 11
 - Bilgisayarda GSBWIFI profilinin kayıtlı olması (ağa en az bir kez bağlanmış olmalısın)
-- **Yönetici izni**: Wi-Fi kartını kapatıp açmak için gerekir. Uygulama her açılışta Windows'un izin penceresini gösterir.
+- Yönetici izni **gerekmez**. Wi-Fi'ı Windows'un kendi Wi-Fi anahtarıyla (hızlı ayarlardaki düğmeyle aynı) kapatıp açar.
 - Ek bir şey yok. Uygulama Windows ile gelen .NET Framework 4 üzerinde çalışır.
 
 ## Demo (tanıtım videosu için)
@@ -125,7 +125,7 @@ Bilinen sınırlar:
 ```
 GSBWifiOtomatik.cs   Uygulamanın tamamı (C#, Windows Forms, Chrome DevTools Protocol)
 build.bat            Derleme betiği
-app.manifest         Yönetici izni isteği
+app.manifest         Çalışma izni ayarı (yönetici izni istemez)
 assets/
   logo.svg           Logo (kaynak)
   logo.png           Logo (512 px)

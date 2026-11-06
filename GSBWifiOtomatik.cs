@@ -1102,7 +1102,7 @@ class App : Form
             if (!open) return;
             string xml = "<?xml version=\"1.0\"?><WLANProfile xmlns=\"http://www.microsoft.com/networking/WLAN/profile/v1\"><name>" + Ssid + "</name><SSIDConfig><SSID><name>" + Ssid + "</name></SSID></SSIDConfig><connectionType>ESS</connectionType><connectionMode>manual</connectionMode><MSM><security><authEncryption><authentication>open</authentication><encryption>none</encryption><useOneX>false</useOneX></authEncryption></security></MSM></WLANProfile>";
             string f = Path.Combine(Path.GetTempPath(), "gsbwifi-profil.xml");
-            File.WriteAllText(f, xml, new UTF8Encoding(false)); Netsh("wlan add profile filename=\"" + f + "\""); try { File.Delete(f); } catch { }
+            File.WriteAllText(f, xml, new UTF8Encoding(false)); Netsh("wlan add profile filename=\"" + f + "\" user=current"); try { File.Delete(f); } catch { }
         } catch { }
     }
     static string CurrentSsid()
@@ -1260,7 +1260,7 @@ try {
   [Windows.Devices.Radios.RadioAccessStatus,Windows.System.Devices,ContentType=WindowsRuntime]|Out-Null
   Await ([Windows.Devices.Radios.Radio]::RequestAccessAsync()) ([Windows.Devices.Radios.RadioAccessStatus])|Out-Null
   $radios=Await ([Windows.Devices.Radios.Radio]::GetRadiosAsync()) ([System.Collections.Generic.IReadOnlyList[Windows.Devices.Radios.Radio]])
-  foreach($r in $radios){ if($r.Kind -eq 'WiFi' -and $r.State -ne 'On'){ $was=$true; if($mode -eq 'on'){ Await ($r.SetStateAsync('On')) ([Windows.Devices.Radios.RadioAccessStatus])|Out-Null } } }
+  foreach($r in $radios){ if($r.Kind -ne 'WiFi'){ continue }; if($mode -eq 'off'){ $was=$true; Await ($r.SetStateAsync('Off')) ([Windows.Devices.Radios.RadioAccessStatus])|Out-Null } elseif($r.State -ne 'On'){ $was=$true; if($mode -eq 'on'){ Await ($r.SetStateAsync('On')) ([Windows.Devices.Radios.RadioAccessStatus])|Out-Null } } }
 } catch {}
 try { Get-NetAdapter -Physical | ? { $_.Status -eq 'Disabled' -and ($_.PhysicalMediaType -match '802.11' -or $_.InterfaceDescription -match 'Wi-?Fi|Wireless') } | % { $was=$true; if($mode -eq 'on'){ Enable-NetAdapter -Name $_.Name -Confirm:$false } } } catch {}
 if($was){'WAS_OFF'}
@@ -1401,8 +1401,18 @@ if($was){'WAS_OFF'}
     }
     static string adapterNow = "Wi-Fi";
     static volatile bool adapterOffByUs = false;
-    static void DisableAdapter() { adapterOffByUs = true; adapterNow = AdapterName(); Netsh("interface set interface name=\"" + adapterNow + "\" admin=disabled"); }
-    static void EnableAdapter() { adapterOffByUs = false; Netsh("interface set interface name=\"" + adapterNow + "\" admin=enabled"); }
+    // Wi-Fi'ı kapat/aç: Windows'un Wi-Fi anahtarı (hızlı ayarlardaki düğmeyle aynı), yönetici izni gerekmez.
+    // Olmazsa (ör. radyo arayüzü yok) kart devre dışı bırakılır; bu yalnızca yönetici olarak çalışırken işe yarar.
+    static void DisableAdapter()
+    {
+        adapterOffByUs = true;
+        if (!RunWifiScript("off")) { adapterNow = AdapterName(); Netsh("interface set interface name=\"" + adapterNow + "\" admin=disabled"); }
+    }
+    static void EnableAdapter()
+    {
+        adapterOffByUs = false; RunWifiScript("on");
+        Netsh("interface set interface name=\"" + adapterNow + "\" admin=enabled");
+    }
     static void ResetAdapter()
     {
         DisableAdapter();
