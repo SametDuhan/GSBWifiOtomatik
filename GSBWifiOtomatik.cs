@@ -798,8 +798,13 @@ class App : Form
         int m = AskMode(this);
         if (m == 1) { credMode = "chrome"; SaveSettings(); Log("Chrome'da kayıtlı bilgiler kullanılacak."); }
         else if (m == 2) {
-            if (AskCred(this)) { credMode = "manual"; SaveSettings(); Log("Giriş bilgileri kaydedildi."); }
+            string u, p;
+            if (LoadCred(out u, out p)) { credMode = "manual"; SaveSettings(); Log("Kayıtlı giriş bilgileri kullanılacak."); } // bir kez girildi, tekrar sorulmaz
+            else if (AskCred(this)) { credMode = "manual"; SaveSettings(); Log("Giriş bilgileri kaydedildi."); }
             else Log("Giriş bilgisi girilmedi.");
+        }
+        else if (m == 3) {
+            if (AskCred(this)) { credMode = "manual"; SaveSettings(); Log("Giriş bilgileri güncellendi."); }
         }
     }
 
@@ -1050,20 +1055,22 @@ class App : Form
         Directory.CreateDirectory(Path.GetDirectoryName(CredPath));
         File.WriteAllBytes(CredPath, ProtectedData.Protect(Encoding.UTF8.GetBytes(user + "\n" + pass), null, DataProtectionScope.CurrentUser));
     }
-    // 1 = Chrome'da kayıtlı, 2 = elle girilecek, 0 = vazgeçti
+    // 1 = Chrome'da kayıtlı, 2 = elle girilecek (kayıtlıysa tekrar sorulmaz), 3 = kayıtlı bilgiyi değiştir, 0 = vazgeçti
     static int AskMode(IWin32Window owner)
     {
-        int result = 0;
+        int result = 0; string cu, cp; bool has = LoadCred(out cu, out cp);
         using (var f = new Form { Text = "GSBWIFI giriş bilgileri", ClientSize = new Size(470, 300), StartPosition = FormStartPosition.CenterScreen, FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, MinimizeBox = false, BackColor = T.Bg, ForeColor = T.Text })
         {
             var head = new Label { Text = "Giriş sayfasındaki bilgilerin nerede?", Location = new Point(20, 18), AutoSize = true, Font = new Font("Segoe UI Semibold", 12.5f), ForeColor = T.Text };
             var b1 = new FlatBtn { Text = "Chrome'da bilgilerim kayıtlı", Location = new Point(20, 62), Size = new Size(430, 46), Fill = T.Accent, Fill2 = Color.FromArgb(34, 211, 238), BackColor = T.Bg };
             var h1 = new Label { Text = "wifi.gsb.gov.tr'de kullanıcı adı ve şifre Chrome'dan kendiliğinden doluyor. Bir şey girmene gerek kalmaz.", Location = new Point(22, 112), Size = new Size(426, 38), ForeColor = T.Muted };
-            var b2 = new FlatBtn { Text = "Bilgilerimi gireyim", Location = new Point(20, 164), Size = new Size(430, 46), Ghost = true, BackColor = T.Bg };
-            var h2 = new Label { Text = "Bir kez sorulur. Bilgiler bu bilgisayarda, sadece senin Windows hesabınla açılabilecek şekilde şifreli saklanır.", Location = new Point(22, 214), Size = new Size(426, 38), ForeColor = T.Muted };
+            var b2 = new FlatBtn { Text = "Bilgilerimi gireyim", Location = new Point(20, 164), Size = new Size(322, 46), Ghost = true, BackColor = T.Bg };
+            var b3 = new FlatBtn { Text = "Değiştir", Location = new Point(352, 164), Size = new Size(98, 46), Ghost = true, BackColor = T.Bg, Enabled = has };
+            var h2 = new Label { Text = has ? "Kayıtlı bilgilerin var, tekrar sorulmaz. Güncellemek için sağdaki Değiştir düğmesini kullan." : "Bir kez sorulur ve kaydedilir. Bilgiler bu bilgisayarda, sadece senin Windows hesabınla açılabilecek şekilde şifreli saklanır.", Location = new Point(22, 214), Size = new Size(426, 38), ForeColor = T.Muted };
             b1.Click += (s, e) => { result = 1; f.Close(); };
             b2.Click += (s, e) => { result = 2; f.Close(); };
-            f.Controls.AddRange(new Control[] { head, b1, h1, b2, h2 });
+            b3.Click += (s, e) => { result = 3; f.Close(); };
+            f.Controls.AddRange(new Control[] { head, b1, h1, b2, b3, h2 });
             if (T.S != 1f) f.Scale(new SizeF(T.S, T.S));
             f.ShowDialog(owner);
         }
