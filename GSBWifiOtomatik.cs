@@ -32,6 +32,23 @@ static class T
         Line = Color.FromArgb(40, 50, 74), Text = Color.FromArgb(233, 237, 246), Muted = Color.FromArgb(135, 147, 170),
         Accent = Color.FromArgb(59, 130, 246), Green = Color.FromArgb(34, 197, 94), Amber = Color.FromArgb(245, 158, 11),
         Red = Color.FromArgb(239, 68, 68), Cursor = Color.FromArgb(255, 94, 196);
+    public static float S = 1f;
+    public static void Tx(Graphics g, string s, float pt, bool semi, Color c, float x, float y, float w, float h, int align, bool vcenter, bool wrap)
+    {
+        if (string.IsNullOrEmpty(s)) return;
+        using (var f = new Font(semi ? "Segoe UI Semibold" : "Segoe UI", pt * 96f / 72f, FontStyle.Regular, GraphicsUnit.Pixel))
+        using (var b = new SolidBrush(c))
+        using (var sf = new StringFormat(StringFormat.GenericTypographic) { Alignment = align == 1 ? StringAlignment.Center : StringAlignment.Near, LineAlignment = vcenter ? StringAlignment.Center : StringAlignment.Near, Trimming = StringTrimming.EllipsisCharacter })
+        {
+            if (!wrap) sf.FormatFlags |= StringFormatFlags.NoWrap;
+            g.DrawString(s, f, b, new RectangleF(x, y, w, h), sf);
+        }
+    }
+    public static float Measure(Graphics g, string s, float pt, bool semi)
+    {
+        using (var f = new Font(semi ? "Segoe UI Semibold" : "Segoe UI", pt * 96f / 72f, FontStyle.Regular, GraphicsUnit.Pixel))
+            return g.MeasureString(s, f, 2000, StringFormat.GenericTypographic).Width;
+    }
     public static GraphicsPath Round(RectangleF r, float rad)
     {
         var p = new GraphicsPath(); float d = rad * 2;
@@ -48,7 +65,7 @@ static class T
 class Cdp : IDisposable
 {
     public const int VW = 1024, VH = 640;
-    Process proc; ClientWebSocket ws; int nextId = 0; readonly object gate = new object();
+    Process proc; ClientWebSocket ws; string profileDir; int nextId = 0; readonly object gate = new object();
     readonly JavaScriptSerializer js = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
     public volatile float CurX = VW * 0.82f, CurY = VH * 0.92f;
     public long ClickTicks = 0;
@@ -73,8 +90,12 @@ class Cdp : IDisposable
         var l = new TcpListener(IPAddress.Loopback, 0); l.Start(); int p = ((IPEndPoint)l.LocalEndpoint).Port; l.Stop(); return p;
     }
 
-    public bool Start(string exe, string profile)
+    public bool Start(string exe, string baseDir)
     {
+        // her çalıştırmaya ayrı geçici profil: eski/yarım kalmış bir Chrome profili kilitleyemez
+        try { foreach (var d in Directory.GetDirectories(baseDir, "chrome*")) try { Directory.Delete(d, true); } catch { } } catch { }
+        string profile = Path.Combine(baseDir, "chrome-" + Process.GetCurrentProcess().Id + "-" + Environment.TickCount);
+        profileDir = profile;
         foreach (bool noSandbox in new[] { false, true })
         {
             int port = FreePort();
@@ -261,6 +282,7 @@ class Cdp : IDisposable
         }
         catch { }
         proc = null;
+        if (profileDir != null) { var d = profileDir; profileDir = null; Task.Run(() => { Thread.Sleep(1500); try { Directory.Delete(d, true); } catch { } }); }
     }
 }
 
@@ -269,7 +291,7 @@ class Cdp : IDisposable
 // ---------------------------------------------------------------------------
 class FlatBtn : Control
 {
-    public Color Fill = T.Card; public bool Ghost = false; bool hover, down;
+    public Color Fill = T.Card, Fill2 = Color.Empty; public bool Ghost = false; bool hover, down;
     public FlatBtn()
     {
         SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw | ControlStyles.Selectable, true);
@@ -281,16 +303,26 @@ class FlatBtn : Control
     protected override void OnMouseUp(MouseEventArgs e) { down = false; Invalidate(); base.OnMouseUp(e); }
     protected override void OnPaint(PaintEventArgs e)
     {
-        var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias; g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
-        g.Clear(Parent != null ? Parent.BackColor : T.Bg);
-        var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
-        Color c = Ghost ? T.Card : Fill; if (hover) c = T.Lighten(c, 14); if (down) c = T.Lighten(c, -12 + 0);
-        using (var p = T.Round(r, 10)) using (var b = new SolidBrush(c))
+        var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias; g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+        g.Clear(Parent != null ? Parent.BackColor : T.Bg); g.ScaleTransform(T.S, T.S);
+        float w = Width / T.S, h = Height / T.S;
+        var r = new RectangleF(0.5f, 0.5f, w - 1.5f, h - 1.5f);
+        int lift = hover ? 22 : 0; if (down) lift = -14;
+        using (var p = T.Round(r, 11))
         {
-            g.FillPath(b, p);
-            if (Ghost) using (var pen = new Pen(hover ? T.Accent : T.Line)) g.DrawPath(pen, p);
+            if (Ghost)
+            {
+                using (var b = new SolidBrush(hover ? T.Lighten(T.Card, 10) : T.Card)) g.FillPath(b, p);
+                using (var pen = new Pen(hover ? T.Accent : T.Line, 1.2f)) g.DrawPath(pen, p);
+            }
+            else
+            {
+                Color c1 = T.Lighten(Fill, lift), c2 = T.Lighten(Fill2.IsEmpty ? T.Lighten(Fill, -30) : Fill2, lift);
+                using (var lg = new LinearGradientBrush(r, c1, c2, 20f)) g.FillPath(lg, p);
+                using (var pen = new Pen(T.A(Color.White, hover ? 70 : 35), 1f)) g.DrawPath(pen, p);
+            }
         }
-        TextRenderer.DrawText(g, Text, Font, Rectangle.Round(r), Ghost ? T.Text : Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+        T.Tx(g, Text, Font.SizeInPoints, true, Ghost ? T.Text : Color.White, 0, 0, w, h, 1, true, false);
     }
 }
 
@@ -309,15 +341,21 @@ class Switch : Control
     protected override void OnClick(EventArgs e) { on = !on; Invalidate(); if (Changed != null) Changed(this, EventArgs.Empty); base.OnClick(e); }
     protected override void OnPaint(PaintEventArgs e)
     {
-        var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias; g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
-        g.Clear(Parent != null ? Parent.BackColor : T.Bg);
-        using (var p = T.Round(new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f), 10)) using (var b = new SolidBrush(hover ? T.Lighten(T.Card, 8) : T.Card)) using (var pen = new Pen(on ? T.A(T.Accent, 140) : T.Line))
+        var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias; g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+        g.Clear(Parent != null ? Parent.BackColor : T.Bg); g.ScaleTransform(T.S, T.S);
+        float w = Width / T.S, h = Height / T.S;
+        using (var p = T.Round(new RectangleF(0.5f, 0.5f, w - 1.5f, h - 1.5f), 11)) using (var b = new SolidBrush(hover ? T.Lighten(T.Card, 8) : T.Card)) using (var pen = new Pen(on ? T.A(T.Accent, 170) : T.Line, 1.2f))
         { g.FillPath(b, p); g.DrawPath(pen, p); }
-        TextRenderer.DrawText(g, Text, Font, new Point(12, 8), T.Text);
-        using (var f = new Font("Segoe UI", 8.25f)) TextRenderer.DrawText(g, Sub, f, new Point(12, 28), T.Muted);
-        var pill = new RectangleF(Width - 52, (Height - 22) / 2f, 40, 22);
-        using (var p = T.Round(pill, 11)) using (var b = new SolidBrush(on ? T.Accent : Color.FromArgb(58, 68, 92))) g.FillPath(b, p);
+        T.Tx(g, Text, 10.5f, true, T.Text, 12, 8, w - 70, 20, 0, false, false);
+        T.Tx(g, Sub, 8.25f, false, T.Muted, 12, 28, w - 70, 16, 0, false, false);
+        var pill = new RectangleF(w - 52, (h - 22) / 2f, 40, 22);
+        using (var p = T.Round(pill, 11))
+        {
+            if (on) using (var lg = new LinearGradientBrush(pill, T.Accent, Color.FromArgb(34, 211, 238), 0f)) g.FillPath(lg, p);
+            else using (var b = new SolidBrush(Color.FromArgb(58, 68, 92))) g.FillPath(b, p);
+        }
         float kx = on ? pill.Right - 20 : pill.X + 2;
+        using (var b = new SolidBrush(Color.FromArgb(60, 0, 0, 0))) g.FillEllipse(b, kx, pill.Y + 3, 18, 18);
         g.FillEllipse(Brushes.White, kx, pill.Y + 2, 18, 18);
     }
 }
@@ -347,11 +385,13 @@ class Overlay : Form
 
     public Overlay()
     {
+        float S = T.S; int pw = (int)Math.Round(W * S), ph = (int)Math.Round(H * S);
         FormBorderStyle = FormBorderStyle.None; ShowInTaskbar = false; TopMost = true; StartPosition = FormStartPosition.Manual;
-        ClientSize = new Size(W, H); BackColor = T.Bg; Opacity = 0.97; DoubleBuffered = true;
-        var wa = Screen.PrimaryScreen.WorkingArea; Location = new Point(wa.Right - W - 16, wa.Bottom - H - 16);
-        using (var p = T.Round(new RectangleF(0, 0, W, H), 16)) Region = new Region(p);
-        tm = new System.Windows.Forms.Timer { Interval = 33 }; tm.Tick += (s, e) => { anim += 0.035f; if (anim > 1) anim -= 1; if (Visible) Invalidate(); };
+        AutoScaleMode = AutoScaleMode.None;
+        ClientSize = new Size(pw, ph); BackColor = T.Bg; Opacity = 0.98; DoubleBuffered = true;
+        var wa = Screen.PrimaryScreen.WorkingArea; Location = new Point(wa.Right - pw - (int)(16 * S), wa.Bottom - ph - (int)(16 * S));
+        using (var p = T.Round(new RectangleF(0, 0, pw, ph), 16 * S)) Region = new Region(p);
+        tm = new System.Windows.Forms.Timer { Interval = 16 }; tm.Tick += (s, e) => { anim += 0.012f; if (anim > 1) anim -= 1; if (Visible) Invalidate(); };
         tm.Start();
         cap = new Thread(CaptureLoop) { IsBackground = true }; cap.Start();
     }
@@ -372,7 +412,7 @@ class Overlay : Form
                         var img = Image.FromStream(new MemoryStream(b));
                         lock (fl) { if (frame != null) frame.Dispose(); frame = img; }
                     }
-                    wait = 120;
+                    wait = 100;
                 }
                 else if (c == null) lock (fl) { if (frame != null) { frame.Dispose(); frame = null; } }
             }
@@ -390,16 +430,21 @@ class Overlay : Form
 
     protected override void OnPaint(PaintEventArgs e)
     {
-        var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias; g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
-        g.Clear(T.Bg);
-        using (var p = T.Round(new RectangleF(0.5f, 0.5f, W - 1.5f, H - 1.5f), 16)) using (var pen = new Pen(T.Line)) g.DrawPath(pen, p);
+        var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias; g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit; g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+        g.Clear(T.Bg); g.ScaleTransform(T.S, T.S);
         Color tone = Tone();
-        // başlık
         float pulse = 0.5f + 0.5f * (float)Math.Sin(anim * Math.PI * 2);
-        using (var b = new SolidBrush(T.A(tone, (int)(60 + 90 * pulse)))) g.FillEllipse(b, 16, 17, 16, 16);
-        using (var b = new SolidBrush(tone)) g.FillEllipse(b, 20, 21, 8, 8);
-        using (var f = new Font("Segoe UI Semibold", 10.5f)) TextRenderer.DrawText(g, Title, f, new Rectangle(40, 10, W - 56, 20), T.Text, TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
-        using (var f = new Font("Segoe UI", 8.25f)) TextRenderer.DrawText(g, Sub, f, new Rectangle(40, 29, W - 56, 16), T.Muted, TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+        var all = new RectangleF(0.5f, 0.5f, W - 1.5f, H - 1.5f);
+        using (var p = T.Round(all, 16))
+        {
+            using (var lg = new LinearGradientBrush(all, Color.FromArgb(24, 32, 52), Color.FromArgb(13, 17, 27), 70f)) g.FillPath(lg, p);
+            using (var pen = new Pen(T.A(tone, (int)(70 + 120 * pulse)), 1.6f)) g.DrawPath(pen, p);
+        }
+        // başlık
+        using (var b = new SolidBrush(T.A(tone, (int)(50 + 100 * pulse)))) g.FillEllipse(b, 14 - 3 * pulse, 15 - 3 * pulse, 20 + 6 * pulse, 20 + 6 * pulse);
+        using (var b = new SolidBrush(tone)) g.FillEllipse(b, 19, 20, 10, 10);
+        T.Tx(g, Title, 10.5f, true, T.Text, 40, 9, W - 56, 20, 0, false, false);
+        T.Tx(g, Sub, 8.25f, false, T.Muted, 40, 28, W - 56, 16, 0, false, false);
 
         var body = new RectangleF(BX, BY, BW, BH);
         var oldClip = g.Clip;
@@ -408,40 +453,41 @@ class Overlay : Form
         var c = Cdp;
         if (img == null)
         {
-            // tarayıcı henüz yok: dönen yay
             float cx = BX + BW / 2f, cy = BY + BH / 2f - 14;
+            for (int k = 0; k < 2; k++)
+            {
+                float t = (anim + k * 0.5f) % 1f, rr = 22 + 34 * t;
+                using (var pen = new Pen(T.A(tone, (int)(110 * (1 - t))), 2f)) g.DrawEllipse(pen, cx - rr, cy - rr, rr * 2, rr * 2);
+            }
             using (var pen = new Pen(T.A(tone, 60), 4)) g.DrawEllipse(pen, cx - 22, cy - 22, 44, 44);
-            using (var pen = new Pen(tone, 4) { StartCap = LineCap.Round, EndCap = LineCap.Round }) g.DrawArc(pen, cx - 22, cy - 22, 44, 44, anim * 360, 100);
-            using (var f = new Font("Segoe UI", 9.5f)) TextRenderer.DrawText(g, Sub.Length > 0 ? Sub : Title, f, new Rectangle(BX + 10, (int)cy + 34, BW - 20, 40), T.Muted, TextFormatFlags.HorizontalCenter | TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix);
+            using (var pen = new Pen(tone, 4) { StartCap = LineCap.Round, EndCap = LineCap.Round }) g.DrawArc(pen, cx - 22, cy - 22, 44, 44, anim * 720, 100);
+            T.Tx(g, Sub.Length > 0 ? Sub : Title, 9.5f, false, T.Muted, BX + 10, cy + 36, BW - 20, 40, 1, false, true);
         }
         if (c != null && c.Alive && img != null)
         {
             float sc = BW / (float)Cdp.VW, x = BX + c.CurX * sc, y = BY + c.CurY * sc;
-            // tıklama dalgası
             long dt = unchecked(Environment.TickCount - c.ClickTicks);
-            if (c.ClickTicks != 0 && dt >= 0 && dt < 650)
+            if (c.ClickTicks != 0 && dt >= 0 && dt < 700)
             {
-                float t = dt / 650f, r = 6 + 34 * t;
-                using (var pen = new Pen(T.A(T.Cursor, (int)(220 * (1 - t))), 3)) g.DrawEllipse(pen, x - r, y - r, r * 2, r * 2);
-                using (var b = new SolidBrush(T.A(T.Cursor, (int)(70 * (1 - t))))) g.FillEllipse(b, x - r, y - r, r * 2, r * 2);
+                float t = dt / 700f, r = 6 + 36 * t;
+                using (var pen = new Pen(T.A(T.Cursor, (int)(230 * (1 - t))), 3)) g.DrawEllipse(pen, x - r, y - r, r * 2, r * 2);
+                using (var b = new SolidBrush(T.A(T.Cursor, (int)(80 * (1 - t))))) g.FillEllipse(b, x - r, y - r, r * 2, r * 2);
             }
-            // ikinci imleç
+            using (var b = new SolidBrush(T.A(T.Cursor, (int)(40 + 30 * pulse)))) g.FillEllipse(b, x - 14, y - 14, 28, 28);
             var pts = new[] { new PointF(0, 0), new PointF(0, 19), new PointF(5, 14.5f), new PointF(8.5f, 22), new PointF(12, 20.5f), new PointF(8.5f, 13.5f), new PointF(15, 13.5f) };
             for (int i = 0; i < pts.Length; i++) pts[i] = new PointF(x + pts[i].X * 1.15f + 1.5f, y + pts[i].Y * 1.15f + 1.5f);
             using (var b = new SolidBrush(Color.FromArgb(90, 0, 0, 0))) g.FillPolygon(b, pts);
             for (int i = 0; i < pts.Length; i++) pts[i] = new PointF(pts[i].X - 1.5f, pts[i].Y - 1.5f);
             using (var b = new SolidBrush(T.Cursor)) g.FillPolygon(b, pts);
             using (var pen = new Pen(Color.White, 1.6f) { LineJoin = LineJoin.Round }) g.DrawPolygon(pen, pts);
-            // eylem etiketi
             string act = c.Action;
             if (!string.IsNullOrEmpty(act))
             {
-                using (var f = new Font("Segoe UI Semibold", 8.5f))
-                {
-                    var sz = TextRenderer.MeasureText(act, f); var chip = new RectangleF(BX + 8, BY + BH - 30, sz.Width + 18, 22);
-                    using (var p = T.Round(chip, 11)) using (var b = new SolidBrush(Color.FromArgb(210, 13, 17, 27))) g.FillPath(b, p);
-                    TextRenderer.DrawText(g, act, f, Rectangle.Round(chip), Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
-                }
+                float tw = T.Measure(g, act, 8.5f, true);
+                var chip = new RectangleF(BX + 8, BY + BH - 30, tw + 24, 22);
+                using (var p = T.Round(chip, 11)) using (var b = new SolidBrush(Color.FromArgb(215, 13, 17, 27))) g.FillPath(b, p);
+                using (var b = new SolidBrush(T.Cursor)) g.FillEllipse(b, chip.X + 8, chip.Y + 8, 6, 6);
+                T.Tx(g, act, 8.5f, true, Color.White, chip.X + 18, chip.Y, tw + 8, 22, 0, true, false);
             }
         }
         g.Clip = oldClip;
@@ -459,7 +505,7 @@ class App : Form
     static readonly string PortalUrl = Environment.GetEnvironmentVariable("GSB_PORTAL") ?? "https://wifi.gsb.gov.tr/login.html";
     const string PortalPost = "https://wifi.gsb.gov.tr/j_spring_security_check";
 
-    TextBox box; FlatBtn btn, btnHide, btnCred; Switch swView; Card card; Label logHead;
+    RichTextBox box; FlatBtn btn, btnHide, btnCred; Switch swView; Card card; Label logHead;
     NotifyIcon tray; System.Windows.Forms.Timer timer, animTimer;
     int attempts = 0, resets = 0, loginFails = 0; float anim = 0;
     bool running = false, busy = false, done = false, viewOn = false;
@@ -470,14 +516,19 @@ class App : Form
 
     static string DataDir { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "GSBWifiOtomatik"); } }
 
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool SetProcessDPIAware();
+
     [STAThread] static void Main()
     {
+        try { SetProcessDPIAware(); } catch { }
+        using (var gg = Graphics.FromHwnd(IntPtr.Zero)) T.S = gg.DpiX / 96f;
         ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072 | SecurityProtocolType.Tls;
         Application.EnableVisualStyles(); Application.Run(new App());
     }
 
     App()
     {
+        AutoScaleMode = AutoScaleMode.None;
         Text = "GSBWIFI Otomatik Bağlantı"; ClientSize = new Size(800, 560); BackColor = T.Bg; ForeColor = T.Text; DoubleBuffered = true;
         StartPosition = FormStartPosition.CenterScreen; FormBorderStyle = FormBorderStyle.FixedSingle; MaximizeBox = false;
         Icon appIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); Icon = appIcon;
@@ -487,7 +538,7 @@ class App : Form
         try { brand.Image = new Icon(appIcon, 48, 48).ToBitmap(); } catch { }
         var brandT = new Label { Left = 72, Top = 24, AutoSize = true, Text = "GSB WiFi", Font = new Font("Segoe UI Semibold", 13.5f), ForeColor = T.Text, BackColor = T.Side };
         var brandS = new Label { Left = 74, Top = 48, AutoSize = true, Text = "Otomatik bağlantı", Font = new Font("Segoe UI", 8.5f), ForeColor = T.Muted, BackColor = T.Side };
-        btn = new FlatBtn { Left = 20, Top = 100, Width = 180, Height = 50, Text = "Başlat", Fill = T.Green, BackColor = T.Side, Font = new Font("Segoe UI Semibold", 12f) };
+        btn = new FlatBtn { Left = 20, Top = 100, Width = 180, Height = 50, Text = "Başlat", Fill = T.Green, Fill2 = Color.FromArgb(14, 165, 160), BackColor = T.Side, Font = new Font("Segoe UI Semibold", 12f) };
         var secHead = new Label { Left = 22, Top = 176, AutoSize = true, Text = "SEÇENEKLER", Font = new Font("Segoe UI Semibold", 8f), ForeColor = T.Muted, BackColor = T.Side };
         swView = new Switch { Left = 20, Top = 198, Width = 180, Height = 54, Text = "Görüntü", Sub = "Sağ altta canlı göster", BackColor = T.Side };
         btnCred = new FlatBtn { Left = 20, Top = 440, Width = 180, Height = 40, Text = "Giriş bilgileri", Ghost = true, BackColor = T.Side };
@@ -498,10 +549,9 @@ class App : Form
         logHead = new Label { Left = 246, Top = 292, AutoSize = true, Text = "KAYIT", Font = new Font("Segoe UI Semibold", 8f), ForeColor = T.Muted, BackColor = T.Bg };
         var logHost = new Panel { Left = 244, Top = 314, Width = 532, Height = 222, BackColor = T.Card, Padding = new Padding(14, 12, 10, 10) };
         logHost.Resize += (s, e) => { using (var p = T.Round(new RectangleF(0, 0, logHost.Width, logHost.Height), 14)) logHost.Region = new Region(p); };
-        box = new TextBox { Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, BorderStyle = BorderStyle.None, BackColor = T.Card, ForeColor = Color.FromArgb(190, 200, 220), Font = new Font("Consolas", 9.5f) };
+        box = new RichTextBox { Dock = DockStyle.Fill, ReadOnly = true, DetectUrls = false, ScrollBars = RichTextBoxScrollBars.Vertical, BorderStyle = BorderStyle.None, BackColor = T.Card, ForeColor = Color.FromArgb(190, 200, 220), Font = new Font("Consolas", 9.5f) };
         logHost.Controls.Add(box);
         Controls.AddRange(new Control[] { side, card, logHead, logHost });
-        using (var p = T.Round(new RectangleF(0, 0, 532, 222), 14)) logHost.Region = new Region(p);
 
         tray = new NotifyIcon { Icon = appIcon, Text = "GSBWIFI Otomatik", Visible = true };
         var menu = new ContextMenuStrip();
@@ -512,8 +562,8 @@ class App : Form
 
         timer = new System.Windows.Forms.Timer { Interval = TickMs };
         timer.Tick += async (s, e) => await Tick();
-        animTimer = new System.Windows.Forms.Timer { Interval = 40 };
-        animTimer.Tick += (s, e) => { anim += 0.03f; if (anim > 1) anim -= 1; if (Visible && WindowState != FormWindowState.Minimized) card.Invalidate(); };
+        animTimer = new System.Windows.Forms.Timer { Interval = 16 };
+        animTimer.Tick += (s, e) => { anim += 0.011f; if (anim > 1) anim -= 1; if (Visible && WindowState != FormWindowState.Minimized) card.Invalidate(); };
         animTimer.Start();
 
         btn.Click += (s, e) => { if (running) StopRun(); else StartRun(); };
@@ -523,6 +573,7 @@ class App : Form
         FormClosing += (s, e) => { cancel = true; running = false; };
         FormClosed += (s, e) => { tray.Visible = false; tray.Dispose(); if (ov != null) ov.Close(); CloseBrowser(); };
 
+        if (T.S != 1f) Scale(new SizeF(T.S, T.S));
         LoadSettings(); swView.Checked = viewOn;
         Shown += (s, e) => {
 #if SELFTEST
@@ -550,7 +601,11 @@ class App : Form
     void Log(string m)
     {
         if (InvokeRequired) { BeginInvoke(new Action(() => Log(m))); return; }
-        box.AppendText("[" + DateTime.Now.ToString("HH:mm:ss") + "] " + m + Environment.NewLine);
+        Color c = Color.FromArgb(190, 200, 220);
+        if (Regex.IsMatch(m, "internet var|açıldı|tıklandı|kaydedildi|Başladı", RegexOptions.IgnoreCase)) c = Color.FromArgb(110, 231, 160);
+        else if (Regex.IsMatch(m, "hata|açılmadı|yanlış|bulunamadı|kapat/aç|gelmedi", RegexOptions.IgnoreCase)) c = Color.FromArgb(251, 191, 100);
+        box.SelectionStart = box.TextLength; box.SelectionColor = T.Muted; box.AppendText("[" + DateTime.Now.ToString("HH:mm:ss") + "] ");
+        box.SelectionColor = c; box.AppendText(m + Environment.NewLine); box.SelectionStart = box.TextLength; box.ScrollToCaret();
     }
 
     void SetState(Ph p, string t, string d)
@@ -565,7 +620,7 @@ class App : Form
 
     void UpdateButton()
     {
-        btn.Text = running ? "Durdur" : "Başlat"; btn.Fill = running ? T.Red : T.Green; btn.Invalidate();
+        btn.Text = running ? "Durdur" : "Başlat"; btn.Fill = running ? T.Red : T.Green; btn.Fill2 = running ? Color.FromArgb(249, 115, 22) : Color.FromArgb(14, 165, 160); btn.Invalidate();
     }
 
     void RefreshOverlay()
@@ -605,44 +660,64 @@ class App : Form
     }
 
     // ---- çizim ----
-    public void PaintCard(Graphics g, Size sz)
+    public void PaintCard(Graphics g, Size px)
     {
-        g.SmoothingMode = SmoothingMode.AntiAlias; g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit; g.Clear(T.Bg);
-        using (var p = T.Round(new RectangleF(0.5f, 0.5f, sz.Width - 1.5f, sz.Height - 1.5f), 18)) using (var b = new SolidBrush(T.Card)) using (var pen = new Pen(T.Line))
-        { g.FillPath(b, p); g.DrawPath(pen, p); }
-
+        float S = T.S;
+        g.SmoothingMode = SmoothingMode.AntiAlias; g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit; g.Clear(T.Bg); g.ScaleTransform(S, S);
+        var sz = new SizeF(px.Width / S, px.Height / S);
         bool active = ph == Ph.Connect || ph == Ph.Reset || ph == Ph.Page || ph == Ph.Login;
         Color tone = ph == Ph.Done ? T.Green : (ph == Ph.Warn || ph == Ph.Reset) ? T.Amber : (ph == Ph.Stopped || ph == Ph.Idle) ? T.Muted : T.Accent;
+        double ang = anim * Math.PI * 2;
+        var rect = new RectangleF(0.5f, 0.5f, sz.Width - 1.5f, sz.Height - 1.5f);
+        using (var p = T.Round(rect, 18))
+        {
+            using (var lg = new LinearGradientBrush(rect, Color.FromArgb(29, 39, 64), Color.FromArgb(19, 25, 41), 55f)) g.FillPath(lg, p);
+            var old = g.Clip; g.SetClip(p);
+            // arkada kayan renkli ışıklar
+            DrawGlow(g, 70 + (float)Math.Sin(ang) * 14, 76 + (float)Math.Cos(ang) * 8, 190, tone, active ? 78 : 44);
+            DrawGlow(g, sz.Width - 70 + (float)Math.Cos(ang) * 30, sz.Height - 40 + (float)Math.Sin(ang) * 14, 170, Color.FromArgb(139, 92, 246), 34);
+            g.Clip = old;
+            using (var pen = new Pen(T.A(tone, active ? 90 : 50), 1.3f)) g.DrawPath(pen, p);
+        }
+
         float cx = 72, cy = 76, r = 32;
         if (active)
-        {
-            float pr = r + 4 + 12 * anim;
-            using (var pen = new Pen(T.A(tone, (int)(120 * (1 - anim))), 2.5f)) g.DrawEllipse(pen, cx - pr, cy - pr, pr * 2, pr * 2);
-        }
-        using (var b = new SolidBrush(T.A(tone, 38))) g.FillEllipse(b, cx - r, cy - r, r * 2, r * 2);
-        using (var pen = new Pen(tone, 3)) g.DrawEllipse(pen, cx - r, cy - r, r * 2, r * 2);
+            for (int k = 0; k < 2; k++)
+            {
+                float t = (anim + k * 0.5f) % 1f, pr = r + 2 + 16 * t;
+                using (var pen = new Pen(T.A(tone, (int)(140 * (1 - t))), 2.5f)) g.DrawEllipse(pen, cx - pr, cy - pr, pr * 2, pr * 2);
+            }
+        var orb = new RectangleF(cx - r, cy - r, r * 2, r * 2);
+        using (var lg = new LinearGradientBrush(orb, T.A(tone, 110), T.A(tone, 25), 60f)) g.FillEllipse(lg, orb);
+        using (var pen = new Pen(tone, 3)) g.DrawEllipse(pen, orb);
         if (active)
-            using (var pen = new Pen(tone, 4) { StartCap = LineCap.Round, EndCap = LineCap.Round }) g.DrawArc(pen, cx - 15, cy - 15, 30, 30, anim * 360, 110);
+        {
+            using (var pen = new Pen(T.A(tone, 70), 4)) g.DrawEllipse(pen, cx - 15, cy - 15, 30, 30);
+            using (var pen = new Pen(tone, 4) { StartCap = LineCap.Round, EndCap = LineCap.Round }) g.DrawArc(pen, cx - 15, cy - 15, 30, 30, anim * 720, 110);
+        }
         else if (ph == Ph.Done)
-            using (var pen = new Pen(tone, 4.5f) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round }) g.DrawLines(pen, new[] { new PointF(cx - 12, cy + 1), new PointF(cx - 3, cy + 10), new PointF(cx + 13, cy - 9) });
+            using (var pen = new Pen(Color.White, 4.5f) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round }) g.DrawLines(pen, new[] { new PointF(cx - 12, cy + 1), new PointF(cx - 3, cy + 10), new PointF(cx + 13, cy - 9) });
         else if (ph == Ph.Warn)
-            using (var f = new Font("Segoe UI", 24, FontStyle.Bold)) TextRenderer.DrawText(g, "!", f, new Rectangle((int)(cx - r), (int)(cy - r), (int)(r * 2), (int)(r * 2)), tone, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+            T.Tx(g, "!", 24, true, tone, cx - r, cy - r, r * 2, r * 2, 1, true, false);
         else
             using (var b = new SolidBrush(tone)) { g.FillRectangle(b, cx - 10, cy - 11, 7, 22); g.FillRectangle(b, cx + 3, cy - 11, 7, 22); }
 
-        using (var f = new Font("Segoe UI Semibold", 18f)) TextRenderer.DrawText(g, title, f, new Rectangle(128, 44, sz.Width - 148, 34), T.Text, TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
-        using (var f = new Font("Segoe UI", 10.5f)) TextRenderer.DrawText(g, detail, f, new Rectangle(128, 80, sz.Width - 148, 44), T.Muted, TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix);
+        T.Tx(g, title, 18f, true, T.Text, 128, 44, sz.Width - 148, 34, 0, false, false);
+        T.Tx(g, detail, 10.5f, false, T.Muted, 128, 82, sz.Width - 148, 46, 0, false, true);
 
         // adımlar
         string[] names = { "Wi-Fi", "Giriş sayfası", "Giriş", "İnternet" };
-        float x0 = 56, x1 = sz.Width - 56, y = 160;
-        for (int i = 0; i < 4; i++)
+        float x0 = 56, x1 = sz.Width - 56, y = 164;
+        for (int i = 0; i < 3; i++)
         {
-            float x = x0 + (x1 - x0) * i / 3f;
-            if (i < 3)
+            float xa = x0 + (x1 - x0) * i / 3f + 12, xb = x0 + (x1 - x0) * (i + 1) / 3f - 12;
+            using (var pen = new Pen(step > i ? T.Green : T.Line, 3.5f) { StartCap = LineCap.Round, EndCap = LineCap.Round }) g.DrawLine(pen, xa, y, xb, y);
+            if (active && step == i)
             {
-                float xn = x0 + (x1 - x0) * (i + 1) / 3f;
-                using (var pen = new Pen(step > i ? T.Green : T.Line, 3)) g.DrawLine(pen, x + 12, y, xn - 12, y);
+                // ilerleyen ışık
+                float len = 34, px0 = xa + (xb - xa - len) * anim;
+                var seg = new RectangleF(px0, y - 3, len, 6);
+                using (var lg = new LinearGradientBrush(seg, T.A(tone, 0), tone, 0f) { WrapMode = WrapMode.TileFlipX }) using (var pen = new Pen(lg, 3.5f) { StartCap = LineCap.Round, EndCap = LineCap.Round }) g.DrawLine(pen, px0, y, px0 + len, y);
             }
         }
         for (int i = 0; i < 4; i++)
@@ -650,11 +725,12 @@ class App : Form
             float x = x0 + (x1 - x0) * i / 3f;
             bool complete = step > i, current = step == i && active;
             Color nc = complete ? T.Green : current ? tone : T.Line;
+            if (current) using (var b = new SolidBrush(T.A(tone, (int)(40 + 40 * Math.Sin(ang))))) g.FillEllipse(b, x - 18, y - 18, 36, 36);
             using (var b = new SolidBrush(complete ? nc : T.Card)) g.FillEllipse(b, x - 12, y - 12, 24, 24);
             using (var pen = new Pen(nc, 2.5f)) g.DrawEllipse(pen, x - 12, y - 12, 24, 24);
             if (complete) using (var pen = new Pen(Color.White, 2.5f) { StartCap = LineCap.Round, EndCap = LineCap.Round }) g.DrawLines(pen, new[] { new PointF(x - 5, y), new PointF(x - 1.5f, y + 4), new PointF(x + 5, y - 4) });
-            else if (current) using (var b = new SolidBrush(nc)) { float k = 4 + 2 * (float)Math.Sin(anim * Math.PI * 2); g.FillEllipse(b, x - k, y - k, k * 2, k * 2); }
-            TextRenderer.DrawText(g, names[i], Font, new Rectangle((int)x - 60, (int)y + 16, 120, 20), (complete || current) ? T.Text : T.Muted, TextFormatFlags.HorizontalCenter | TextFormatFlags.NoPrefix);
+            else if (current) using (var b = new SolidBrush(nc)) { float k = 4 + 2 * (float)Math.Sin(ang); g.FillEllipse(b, x - k, y - k, k * 2, k * 2); }
+            T.Tx(g, names[i], 9f, complete || current, (complete || current) ? T.Text : T.Muted, x - 60, y + 17, 120, 20, 1, false, false);
         }
 
         // sayaçlar
@@ -664,8 +740,17 @@ class App : Form
         for (int i = 0; i < 3; i++)
         {
             float x = 24 + cw * i;
-            using (var f = new Font("Segoe UI Semibold", 7.5f)) TextRenderer.DrawText(g, lab[i], f, new Point((int)x, 202), T.Muted, TextFormatFlags.NoPrefix);
-            using (var f = new Font("Segoe UI Semibold", 13f)) TextRenderer.DrawText(g, val[i], f, new Point((int)x, 216), T.Text, TextFormatFlags.NoPrefix);
+            T.Tx(g, lab[i], 7.5f, true, T.Muted, x, 204, cw, 14, 0, false, false);
+            T.Tx(g, val[i], 14f, true, T.Text, x, 218, cw, 26, 0, false, false);
+        }
+    }
+
+    static void DrawGlow(Graphics g, float cx, float cy, float rad, Color c, int alpha)
+    {
+        using (var gp = new GraphicsPath())
+        {
+            gp.AddEllipse(cx - rad, cy - rad, rad * 2, rad * 2);
+            using (var pb = new PathGradientBrush(gp) { CenterColor = T.A(c, alpha), SurroundColors = new[] { T.A(c, 0) } }) g.FillPath(pb, gp);
         }
     }
 
@@ -726,6 +811,7 @@ class App : Form
             var note = new Label { Text = "Bilgiler bu bilgisayarda, sadece senin Windows hesabınla açılabilecek şekilde şifreli saklanır.", Location = new Point(14, 102), Size = new Size(330, 40), ForeColor = T.Muted };
             f.Controls.AddRange(new Control[] { new Label { Text = "Kullanıcı adı", Location = new Point(14, 26), AutoSize = true }, new Label { Text = "Şifre", Location = new Point(14, 66), AutoSize = true }, tu, tp, note, ok, cancel });
             f.AcceptButton = null; f.CancelButton = null;
+            if (T.S != 1f) f.Scale(new SizeF(T.S, T.S));
             if (f.ShowDialog(owner) != DialogResult.OK || tu.Text.Trim() == "" || tp.Text == "") return false;
             SaveCred(tu.Text.Trim(), tp.Text); return true;
         }
@@ -745,7 +831,7 @@ class App : Form
                 SetState(Ph.Page, "Tarayıcı hazırlanıyor", "Chrome arka planda açılıyor");
                 var c = new Cdp(); c.Cancelled = () => cancel;
                 Directory.CreateDirectory(DataDir);
-                if (!c.Start(exe, Path.Combine(DataDir, "chrome"))) { c.Dispose(); return cancel ? "cancel" : "nochrome"; }
+                if (!c.Start(exe, DataDir)) { c.Dispose(); return cancel ? "cancel" : "nochrome"; }
                 cdp = c; var o = ov; if (o != null) o.Cdp = c;
             }
             var b = cdp;
