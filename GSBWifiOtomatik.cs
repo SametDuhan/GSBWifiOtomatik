@@ -69,7 +69,10 @@ class Cdp : IDisposable
     readonly JavaScriptSerializer js = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
     public volatile float CurX = VW * 0.82f, CurY = VH * 0.92f;
     public long ClickTicks = 0;
-    public volatile string Action = "";
+    string act = "";
+    public Action<string> OnAction; public Action<float, float> GhostMove; public Action GhostClick; public PointF? InitScreen;
+    double ox = 0, oy = 0, dpr = 1; public bool Headed = false;
+    public string Action { get { return act; } set { act = value; var h = OnAction; if (h != null) h(value); } }
     public Action<string> Seed;
     public Func<bool> Cancelled = () => false;
 
@@ -91,7 +94,7 @@ class Cdp : IDisposable
         var l = new TcpListener(IPAddress.Loopback, 0); l.Start(); int p = ((IPEndPoint)l.LocalEndpoint).Port; l.Stop(); return p;
     }
 
-    public bool Start(string exe, string baseDir)
+    public bool Start(string exe, string baseDir, bool headed)
     {
         // her çalıştırmaya ayrı geçici profil: eski/yarım kalmış bir Chrome profili kilitleyemez
         try { foreach (var d in Directory.GetDirectories(baseDir, "chrome*")) try { Directory.Delete(d, true); } catch { } } catch { }
@@ -101,8 +104,9 @@ class Cdp : IDisposable
         foreach (bool noSandbox in new[] { false, true })
         {
             int port = FreePort();
-            string args = "--headless=new --remote-debugging-port=" + port + " --remote-allow-origins=* --user-data-dir=\"" + profile + "\"" +
-                " --window-size=" + VW + "," + VH + " --no-first-run --no-default-browser-check --disable-gpu --disable-extensions --mute-audio" +
+            Headed = headed;
+            string args = (headed ? "--window-position=140,40 --window-size=1100,800" : "--headless=new --window-size=" + VW + "," + VH) + " --remote-debugging-port=" + port + " --remote-allow-origins=* --user-data-dir=\"" + profile + "\"" +
+                " --no-first-run --no-default-browser-check --disable-gpu --disable-extensions --mute-audio" +
                 " --disable-features=Translate --user-agent=\"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36\"" +
                 (noSandbox ? " --no-sandbox" : "") + " about:blank";
             try { proc = Process.Start(new ProcessStartInfo(exe, args) { UseShellExecute = false, CreateNoWindow = true }); } catch { return false; }
@@ -114,7 +118,7 @@ class Cdp : IDisposable
                     ws = new ClientWebSocket();
                     if (!ws.ConnectAsync(new Uri(url), CancellationToken.None).Wait(6000)) throw new IOException("ws");
                     Call("Page.enable");
-                    Call("Emulation.setDeviceMetricsOverride", new Dictionary<string, object> { { "width", VW }, { "height", VH }, { "deviceScaleFactor", 1 }, { "mobile", false } });
+                    if (!headed) Call("Emulation.setDeviceMetricsOverride", new Dictionary<string, object> { { "width", VW }, { "height", VH }, { "deviceScaleFactor", 1 }, { "mobile", false } });
                     // Canlı görünümde kullanıcı adı ve şifre okunmasın: giriş alanlarındaki yazı noktaya çevrilir (gönderilen değer değişmez)
                     Call("Page.addScriptToEvaluateOnNewDocument", new Dictionary<string, object> { { "source",
                         "(function(){function m(){var s=document.createElement('style');s.textContent='input:not([type=submit]):not([type=button]):not([type=checkbox]):not([type=radio]):not([type=hidden]){-webkit-text-security:disc !important;}';(document.head||document.documentElement).appendChild(s);}" +
@@ -220,6 +224,7 @@ class Cdp : IDisposable
             double t = i / (double)steps, e = t < 0.5 ? 2 * t * t : 1 - Math.Pow(-2 * t + 2, 2) / 2;
             CurX = (float)(sx + (x - sx) * e); CurY = (float)(sy + (y - sy) * e);
             Mouse("mouseMoved", CurX, CurY, "none", 0);
+            var gm = GhostMove; if (gm != null && Headed) { gm((float)(ox + CurX * dpr), (float)(oy + CurY * dpr)); }
             Thread.Sleep(16);
         }
     }
@@ -227,6 +232,7 @@ class Cdp : IDisposable
     public void Click()
     {
         Mouse("mousePressed", CurX, CurY, "left", 1); ClickTicks = Environment.TickCount;
+        var gc = GhostClick; if (gc != null && Headed) gc();
         Thread.Sleep(90);
         Mouse("mouseReleased", CurX, CurY, "left", 1);
         Thread.Sleep(150);
@@ -248,12 +254,28 @@ class Cdp : IDisposable
         return ClickPos(pos, "Giriş düğmesi");
     }
 
+    // Sayfa koordinatını ekran koordinatına çevirmek için pencerenin ekrandaki yeri
+    void RefreshMetrics()
+    {
+        if (!Headed) return;
+        try {
+            string m = Eval("[window.screenX,window.screenY,window.outerWidth,window.outerHeight,window.innerWidth,window.innerHeight,window.devicePixelRatio].join(',')") as string;
+            if (m == null) return;
+            var q = m.Split(','); var ic = System.Globalization.CultureInfo.InvariantCulture;
+            double sx = double.Parse(q[0], ic), sy = double.Parse(q[1], ic), ow = double.Parse(q[2], ic), oh = double.Parse(q[3], ic), iw = double.Parse(q[4], ic), ih = double.Parse(q[5], ic);
+            dpr = double.Parse(q[6], ic); double side = (ow - iw) / 2;
+            ox = (sx + side) * dpr; oy = (sy + (oh - ih) - side) * dpr;
+            if (InitScreen.HasValue) { CurX = (float)((InitScreen.Value.X - ox) / dpr); CurY = (float)((InitScreen.Value.Y - oy) / dpr); InitScreen = null; }
+        } catch { }
+    }
+
     bool ClickPos(string pos, string what)
     {
         if (string.IsNullOrEmpty(pos)) return false;
         var p = pos.Split(',');
         double x = double.Parse(p[0], System.Globalization.CultureInfo.InvariantCulture), y = double.Parse(p[1], System.Globalization.CultureInfo.InvariantCulture);
         Action = what + " için gidiliyor";
+        RefreshMetrics();
         MoveTo(x, y);
         Action = "Tıklandı: " + what;
         Click();
@@ -387,130 +409,252 @@ class Card : Control
 }
 
 // ---------------------------------------------------------------------------
-//  Sağ alt köşedeki canlı görünüm (tıklanamaz, odak almaz)
+//  İkinci imleç: gerçek masaüstünün üstünde gezen, tıklanamaz sanal imleç.
+//  Senin farene dokunmaz; programın o an nereye tıkladığını gösterir.
 // ---------------------------------------------------------------------------
-class Overlay : Form
+class Ghost : Form
 {
-    public volatile string Title = "", Sub = ""; public volatile Cdp Cdp; public volatile Ph Phase = Ph.Idle;
-    Image frame; readonly object fl = new object();
-    System.Windows.Forms.Timer tm; Thread cap; volatile bool stop; float anim;
-    const int W = 448, H = 328, BX = 16, BY = 52, BW = 416, BH = 260;
+    const int W = 760, H = 180, TX = 380, TY = 70; // pencere boyutu ve imlecin pencere içindeki ucu (mantıksal piksel)
+    public volatile bool ChipLeft; public volatile float X, Y; public long ClickTicks = 0; public volatile string Label = "";
+    long lastActive = 0; volatile bool wantShow;
+    System.Windows.Forms.Timer tm; float anim; Bitmap bmp; int lastTop = 0;
+    readonly PointF[] trail = new PointF[10];
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)] struct BLEND { public byte Op, Flags, Alpha, Format; }
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool UpdateLayeredWindow(IntPtr h, IntPtr hdcDst, ref Point pDst, ref Size sz, IntPtr hdcSrc, ref Point pSrc, int key, ref BLEND bl, int flags);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern IntPtr GetDC(IntPtr h);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern int ReleaseDC(IntPtr h, IntPtr dc);
+    [System.Runtime.InteropServices.DllImport("gdi32.dll")] static extern IntPtr CreateCompatibleDC(IntPtr dc);
+    [System.Runtime.InteropServices.DllImport("gdi32.dll")] static extern bool DeleteDC(IntPtr dc);
+    [System.Runtime.InteropServices.DllImport("gdi32.dll")] static extern IntPtr SelectObject(IntPtr dc, IntPtr o);
+    [System.Runtime.InteropServices.DllImport("gdi32.dll")] static extern bool DeleteObject(IntPtr o);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
 
     protected override bool ShowWithoutActivation { get { return true; } }
     protected override CreateParams CreateParams
     {
-        get { var cp = base.CreateParams; cp.ExStyle |= 0x80 | 0x08000000 | 0x20; return cp; } // araç penceresi, odaksız, fareyi geçirir
+        get { var cp = base.CreateParams; cp.ExStyle |= 0x80000 | 0x20 | 0x80 | 0x08000000 | 0x8; return cp; } // katmanlı, fareyi geçirir, araç penceresi, odaksız, üstte
     }
 
-    public Overlay()
+    public Ghost()
     {
-        float S = T.S; int pw = (int)Math.Round(W * S), ph = (int)Math.Round(H * S);
         FormBorderStyle = FormBorderStyle.None; ShowInTaskbar = false; TopMost = true; StartPosition = FormStartPosition.Manual;
-        AutoScaleMode = AutoScaleMode.None;
-        ClientSize = new Size(pw, ph); BackColor = T.Bg; Opacity = 0.98; DoubleBuffered = true;
-        var wa = Screen.PrimaryScreen.WorkingArea; Location = new Point(wa.Right - pw - (int)(16 * S), wa.Bottom - ph - (int)(16 * S));
-        using (var p = T.Round(new RectangleF(0, 0, pw, ph), 16 * S)) Region = new Region(p);
-        tm = new System.Windows.Forms.Timer { Interval = 16 }; tm.Tick += (s, e) => { anim += 0.012f; if (anim > 1) anim -= 1; if (Visible) Invalidate(); };
-        tm.Start();
-        cap = new Thread(CaptureLoop) { IsBackground = true }; cap.Start();
+        AutoScaleMode = AutoScaleMode.None; Size = new Size((int)Math.Round(W * T.S), (int)Math.Round(H * T.S));
+        bmp = new Bitmap(Width, Height, System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+        var p = Cursor.Position; X = p.X + 90; Y = p.Y + 60;
+        tm = new System.Windows.Forms.Timer { Interval = 16 }; tm.Tick += (s, e) => Render(); tm.Start();
     }
 
-    void CaptureLoop()
+    public void Poke() { lastActive = Environment.TickCount; wantShow = true; }
+    public void Start() { var p = Cursor.Position; X = p.X + 90; Y = p.Y + 60; for (int i = 0; i < trail.Length; i++) trail[i] = new PointF(X, Y); Poke(); }
+    public void SetPos(float x, float y) { X = x; Y = y; Poke(); }
+    public void Stop() { wantShow = false; }
+    public void Tap(string label) { Label = label; ClickTicks = Environment.TickCount; Poke(); Thread.Sleep(550); }
+
+    // Kolay hareket: eğrisel yol, ivmeli
+    public void MoveTo(float x, float y)
     {
-        while (!stop)
+        Poke();
+        float sx = X, sy = Y, dx = x - sx, dy = y - sy, dist = (float)Math.Sqrt(dx * dx + dy * dy);
+        int steps = Math.Max(20, Math.Min(70, (int)(dist / 12)));
+        float nx = -dy / (dist + 1) * Math.Min(60, dist * 0.12f); // hafif yay
+        float ny = dx / (dist + 1) * Math.Min(60, dist * 0.12f);
+        for (int i = 1; i <= steps; i++)
         {
-            int wait = 330;
+            float t = i / (float)steps, e = t < 0.5f ? 2 * t * t : 1 - (float)Math.Pow(-2 * t + 2, 2) / 2, bow = (float)Math.Sin(t * Math.PI);
+            X = sx + dx * e + nx * bow; Y = sy + dy * e + ny * bow; Poke();
+            Thread.Sleep(14);
+        }
+        X = x; Y = y; Thread.Sleep(180);
+    }
+
+    void Render()
+    {
+        long idle = unchecked(Environment.TickCount - lastActive);
+        bool active = wantShow && idle < 3200;
+        if (!active) { if (Visible) Hide(); return; }
+        anim += 0.02f; if (anim > 1) anim -= 1;
+        if (!Visible) { Show(); }
+        float S = T.S;
+        for (int i = trail.Length - 1; i > 0; i--) trail[i] = trail[i - 1];
+        trail[0] = new PointF(X, Y);
+        float fade = idle > 2400 ? Math.Max(0f, 1f - (idle - 2400) / 800f) : 1f;
+        using (var g = Graphics.FromImage(bmp))
+        {
+            g.Clear(Color.Transparent);
+            g.SmoothingMode = SmoothingMode.AntiAlias; g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+            g.ScaleTransform(S, S);
+            Paint2(g, fade);
+        }
+        IntPtr sdc = GetDC(IntPtr.Zero), mdc = CreateCompatibleDC(sdc), hb = bmp.GetHbitmap(Color.FromArgb(0)), old = SelectObject(mdc, hb);
+        try
+        {
+            var dst = new Point((int)(X - TX * S), (int)(Y - TY * S)); var sz = new Size(bmp.Width, bmp.Height); var src = new Point(0, 0);
+            var bl = new BLEND { Op = 0, Flags = 0, Alpha = 255, Format = 1 };
+            UpdateLayeredWindow(Handle, sdc, ref dst, ref sz, mdc, ref src, 0, ref bl, 2);
+            if (unchecked(Environment.TickCount - lastTop) > 300) { lastTop = Environment.TickCount; SetWindowPos(Handle, new IntPtr(-1), 0, 0, 0, 0, 0x1 | 0x2 | 0x10 | 0x40); }
+        }
+        finally { SelectObject(mdc, old); DeleteObject(hb); DeleteDC(mdc); ReleaseDC(IntPtr.Zero, sdc); }
+    }
+
+    void Paint2(Graphics g, float fade)
+    {
+        Func<int, int> al = a => (int)(a * fade);
+        float S = T.S;
+        // iz
+        for (int i = trail.Length - 1; i >= 1; i--)
+        {
+            float px = TX + (trail[i].X - X) / S, py = TY + (trail[i].Y - Y) / S, r = 2 + (trail.Length - i) * 0.5f;
+            using (var b = new SolidBrush(T.A(T.Cursor, al(14 + (trail.Length - i) * 4)))) g.FillEllipse(b, px - r, py - r, r * 2, r * 2);
+        }
+        // tıklama dalgası
+        long dt = unchecked(Environment.TickCount - ClickTicks);
+        if (ClickTicks != 0 && dt >= 0 && dt < 800)
+        {
+            float t = dt / 800f, r = 8 + 42 * t;
+            using (var pen = new Pen(T.A(T.Cursor, al((int)(240 * (1 - t)))), 3.5f)) g.DrawEllipse(pen, TX - r, TY - r, r * 2, r * 2);
+            using (var b = new SolidBrush(T.A(T.Cursor, al((int)(90 * (1 - t)))))) g.FillEllipse(b, TX - r, TY - r, r * 2, r * 2);
+            float r2 = 6 + 22 * t;
+            using (var pen = new Pen(T.A(Color.White, al((int)(200 * (1 - t)))), 2f)) g.DrawEllipse(pen, TX - r2, TY - r2, r2 * 2, r2 * 2);
+        }
+        // parıltı
+        float pulse = 0.5f + 0.5f * (float)Math.Sin(anim * Math.PI * 2);
+        using (var b = new SolidBrush(T.A(T.Cursor, al((int)(34 + 26 * pulse))))) g.FillEllipse(b, TX - 18, TY - 18, 36, 36);
+        // imleç
+        var pts = new[] { new PointF(0, 0), new PointF(0, 19), new PointF(5, 14.5f), new PointF(8.5f, 22), new PointF(12, 20.5f), new PointF(8.5f, 13.5f), new PointF(15, 13.5f) };
+        float k = 1.3f;
+        var sh = new PointF[pts.Length]; var cu = new PointF[pts.Length];
+        for (int i = 0; i < pts.Length; i++) { cu[i] = new PointF(TX + pts[i].X * k, TY + pts[i].Y * k); sh[i] = new PointF(cu[i].X + 2, cu[i].Y + 2.5f); }
+        using (var b = new SolidBrush(Color.FromArgb(al(110), 0, 0, 0))) g.FillPolygon(b, sh);
+        using (var b = new SolidBrush(T.A(T.Cursor, al(255)))) g.FillPolygon(b, cu);
+        using (var pen = new Pen(T.A(Color.White, al(255)), 1.8f) { LineJoin = LineJoin.Round }) g.DrawPolygon(pen, cu);
+        // etiket
+        string lab = Label;
+        if (!string.IsNullOrEmpty(lab))
+        {
+            float tw = T.Measure(g, lab, 9f, true), cw = tw + 34;
+            var scr = Screen.FromPoint(new Point((int)X, (int)Y)).Bounds;
+            bool flip = ChipLeft || X + (30 + cw) * S > scr.Right - 10;
+            bool up = Y + (70 + 40) * S > scr.Bottom;
+            float cx = flip ? TX - 16 - cw : TX + 30, cy = up ? TY - 62 : TY + 34;
+            var chip = new RectangleF(cx, cy, cw, 26);
+            using (var p = T.Round(chip, 13)) using (var b = new SolidBrush(Color.FromArgb(al(238), 13, 17, 27))) using (var pen = new Pen(T.A(T.Cursor, al(200)), 1.4f)) { g.FillPath(b, p); g.DrawPath(pen, p); }
+            using (var b = new SolidBrush(T.A(T.Cursor, al(255)))) g.FillEllipse(b, chip.X + 11, chip.Y + 10, 6, 6);
+            T.Tx(g, lab, 9f, true, T.A(Color.White, al(255)), chip.X + 24, chip.Y, tw + 8, 26, 0, true, false);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+//  Windows arayüzünde (görev çubuğu, hızlı ayarlar) öğe bulma: UI Automation
+// ---------------------------------------------------------------------------
+static class Desk
+{
+    static readonly Regex TrayRx = new Regex(@"^\s*(Ağ|Network|Wi-?Fi)", RegexOptions.IgnoreCase);
+    static readonly Regex TileRx = new Regex(@"^\s*Wi-?Fi", RegexOptions.IgnoreCase);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern void keybd_event(byte vk, byte scan, int flags, int extra);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern IntPtr FindWindow(string cls, string name);
+    delegate bool EnumProc(IntPtr h, IntPtr l);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool EnumWindows(EnumProc p, IntPtr l);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr h, out Rectangle r4);
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)] static extern int GetClassName(IntPtr h, StringBuilder sb, int n);
+    public static string LastSeen = "";
+
+    // Ekranın sağ alt köşesindeki (hızlı ayarlar paneli olabilecek) pencereler
+    static List<IntPtr> CornerWindows(out string seen)
+    {
+        var list = new List<IntPtr>(); var sb0 = new StringBuilder(); var scr = Screen.PrimaryScreen.Bounds;
+        EnumWindows((h, l) =>
+        {
+            if (!IsWindowVisible(h)) return true;
+            Rectangle rc; if (!GetWindowRect(h, out rc)) return true;
+            var cn = new StringBuilder(128); GetClassName(h, cn, 128); string c = cn.ToString();
+            int w = rc.Width - rc.X, ht = rc.Height - rc.Y; // GetWindowRect: Width/Height alanları sağ/alt koordinat olarak gelir
+            bool corner = w >= 250 && w <= 800 && ht >= 120 && rc.Width >= scr.Right - 90 && rc.Height >= scr.Bottom - 220 && c != "Shell_TrayWnd" && c != "Progman";
+            if (corner) sb0.Append(c).Append('(').Append(w).Append('x').Append(ht).Append(") ");
+            if (corner || Regex.IsMatch(c, "ControlCenter|NetworkUX|XamlExplorerHost|XamlIsland")) list.Add(h);
+            return true;
+        }, IntPtr.Zero);
+        seen = sb0.ToString(); return list;
+    }
+
+    public static System.Windows.Automation.AutomationElement FindTrayButton()
+    {
+        // Görev çubuğunun XAML öğeleri ilk sorguda geç yüklenebiliyor: kısa süre tekrar denenir
+        var end = DateTime.UtcNow.AddMilliseconds(5000);
+        var AE = System.Windows.Automation.AutomationElement.ControlTypeProperty;
+        var cond = new System.Windows.Automation.PropertyCondition(AE, System.Windows.Automation.ControlType.Button);
+        while (DateTime.UtcNow < end)
+        {
             try
             {
-                var c = Cdp;
-                if (Visible && c != null && c.Alive)
+                IntPtr hw = FindWindow("Shell_TrayWnd", null);
+                if (hw != IntPtr.Zero)
                 {
-                    var b = c.Screenshot();
-                    if (b != null)
-                    {
-                        var img = Image.FromStream(new MemoryStream(b));
-                        lock (fl) { if (frame != null) frame.Dispose(); frame = img; }
-                    }
-                    wait = 100;
+                    var tb = System.Windows.Automation.AutomationElement.FromHandle(hw);
+                    foreach (System.Windows.Automation.AutomationElement e in tb.FindAll(System.Windows.Automation.TreeScope.Descendants, cond))
+                    { string n = e.Current.Name ?? ""; if (TrayRx.IsMatch(n) && !e.Current.BoundingRectangle.IsEmpty) return e; }
                 }
-                else if (c == null) lock (fl) { if (frame != null) { frame.Dispose(); frame = null; } }
             }
             catch { }
-            Thread.Sleep(wait);
+            Thread.Sleep(300);
         }
+        return null;
     }
 
-    protected override void OnFormClosed(FormClosedEventArgs e) { stop = true; tm.Stop(); base.OnFormClosed(e); }
-
-    Color Tone()
+    public static Point Center(System.Windows.Automation.AutomationElement e)
     {
-        switch (Phase) { case Ph.Done: return T.Green; case Ph.Warn: case Ph.Reset: return T.Amber; case Ph.Stopped: case Ph.Idle: return T.Muted; default: return T.Accent; }
+        var r = e.Current.BoundingRectangle; return new Point((int)(r.Left + r.Width / 2), (int)(r.Top + r.Height / 2));
     }
 
-    protected override void OnPaint(PaintEventArgs e)
+    public static void Press(System.Windows.Automation.AutomationElement e)
     {
-        var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias; g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit; g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-        g.Clear(T.Bg); g.ScaleTransform(T.S, T.S);
-        Color tone = Tone();
-        float pulse = 0.5f + 0.5f * (float)Math.Sin(anim * Math.PI * 2);
-        var all = new RectangleF(0.5f, 0.5f, W - 1.5f, H - 1.5f);
-        using (var p = T.Round(all, 16))
-        {
-            using (var lg = new LinearGradientBrush(all, Color.FromArgb(24, 32, 52), Color.FromArgb(13, 17, 27), 70f)) g.FillPath(lg, p);
-            using (var pen = new Pen(T.A(tone, (int)(70 + 120 * pulse)), 1.6f)) g.DrawPath(pen, p);
-        }
-        // başlık
-        using (var b = new SolidBrush(T.A(tone, (int)(50 + 100 * pulse)))) g.FillEllipse(b, 14 - 3 * pulse, 15 - 3 * pulse, 20 + 6 * pulse, 20 + 6 * pulse);
-        using (var b = new SolidBrush(tone)) g.FillEllipse(b, 19, 20, 10, 10);
-        T.Tx(g, Title, 10.5f, true, T.Text, 40, 9, W - 56, 20, 0, false, false);
-        T.Tx(g, Sub, 8.25f, false, T.Muted, 40, 28, W - 56, 16, 0, false, false);
+        object p;
+        if (e.TryGetCurrentPattern(System.Windows.Automation.TogglePattern.Pattern, out p)) ((System.Windows.Automation.TogglePattern)p).Toggle();
+        else if (e.TryGetCurrentPattern(System.Windows.Automation.InvokePattern.Pattern, out p)) ((System.Windows.Automation.InvokePattern)p).Invoke();
+        else throw new InvalidOperationException("öğe tıklanamıyor");
+    }
 
-        var body = new RectangleF(BX, BY, BW, BH);
-        var oldClip = g.Clip;
-        using (var p = T.Round(body, 10)) { using (var b = new SolidBrush(Color.FromArgb(10, 13, 21))) g.FillPath(b, p); g.SetClip(p); }
-        Image img; lock (fl) { img = frame; if (img != null) try { g.DrawImage(img, body); } catch { } }
-        var c = Cdp;
-        if (img == null)
+    // Windows 11 hızlı ayarlar panelinde ilk düğmenin (Wi-Fi) yaklaşık yeri: panel sağ-alta yaslı, ölçüler ekran ölçeğiyle büyür
+    public static Point? EstimateTile()
+    {
+        IntPtr hw = FindWindow("Shell_TrayWnd", null); Rectangle r; if (hw == IntPtr.Zero || !GetWindowRect(hw, out r)) return null;
+        var scr = Screen.PrimaryScreen.Bounds;
+        return new Point((int)(scr.Right - 300 * T.S), (int)(r.Y - 352 * T.S));
+    }
+
+    public static void Esc() { keybd_event(0x1B, 0, 0, 0); keybd_event(0x1B, 0, 2, 0); }
+
+    // Hızlı ayarlar panelindeki "Wi-Fi" düğmesi
+    public static System.Windows.Automation.AutomationElement FindTile(int ms)
+    {
+        var end = DateTime.UtcNow.AddMilliseconds(ms);
+        var btnCond = new System.Windows.Automation.OrCondition(
+            new System.Windows.Automation.PropertyCondition(System.Windows.Automation.AutomationElement.ControlTypeProperty, System.Windows.Automation.ControlType.Button),
+            new System.Windows.Automation.PropertyCondition(System.Windows.Automation.AutomationElement.ControlTypeProperty, System.Windows.Automation.ControlType.CheckBox));
+        while (DateTime.UtcNow < end)
         {
-            float cx = BX + BW / 2f, cy = BY + BH / 2f - 14;
-            for (int k = 0; k < 2; k++)
+            try
             {
-                float t = (anim + k * 0.5f) % 1f, rr = 22 + 34 * t;
-                using (var pen = new Pen(T.A(tone, (int)(110 * (1 - t))), 2f)) g.DrawEllipse(pen, cx - rr, cy - rr, rr * 2, rr * 2);
+                string seen; var wins = CornerWindows(out seen); LastSeen = seen;
+                foreach (var h in wins)
+                {
+                    var w = System.Windows.Automation.AutomationElement.FromHandle(h);
+                    System.Windows.Automation.AutomationElement best = null;
+                    foreach (System.Windows.Automation.AutomationElement e in w.FindAll(System.Windows.Automation.TreeScope.Descendants, btnCond))
+                    {
+                        var ec = e.Current; if (ec.BoundingRectangle.IsEmpty || !TileRx.IsMatch(ec.Name ?? "")) continue;
+                        object p; if (e.TryGetCurrentPattern(System.Windows.Automation.TogglePattern.Pattern, out p)) return e;
+                        if (best == null) best = e;
+                    }
+                    if (best != null) return best;
+                }
             }
-            using (var pen = new Pen(T.A(tone, 60), 4)) g.DrawEllipse(pen, cx - 22, cy - 22, 44, 44);
-            using (var pen = new Pen(tone, 4) { StartCap = LineCap.Round, EndCap = LineCap.Round }) g.DrawArc(pen, cx - 22, cy - 22, 44, 44, anim * 720, 100);
-            T.Tx(g, Sub.Length > 0 ? Sub : Title, 9.5f, false, T.Muted, BX + 10, cy + 36, BW - 20, 40, 1, false, true);
+            catch { }
+            Thread.Sleep(250);
         }
-        if (c != null && c.Alive && img != null)
-        {
-            float sc = BW / (float)Cdp.VW, x = BX + c.CurX * sc, y = BY + c.CurY * sc;
-            long dt = unchecked(Environment.TickCount - c.ClickTicks);
-            if (c.ClickTicks != 0 && dt >= 0 && dt < 700)
-            {
-                float t = dt / 700f, r = 6 + 36 * t;
-                using (var pen = new Pen(T.A(T.Cursor, (int)(230 * (1 - t))), 3)) g.DrawEllipse(pen, x - r, y - r, r * 2, r * 2);
-                using (var b = new SolidBrush(T.A(T.Cursor, (int)(80 * (1 - t))))) g.FillEllipse(b, x - r, y - r, r * 2, r * 2);
-            }
-            using (var b = new SolidBrush(T.A(T.Cursor, (int)(40 + 30 * pulse)))) g.FillEllipse(b, x - 14, y - 14, 28, 28);
-            var pts = new[] { new PointF(0, 0), new PointF(0, 19), new PointF(5, 14.5f), new PointF(8.5f, 22), new PointF(12, 20.5f), new PointF(8.5f, 13.5f), new PointF(15, 13.5f) };
-            for (int i = 0; i < pts.Length; i++) pts[i] = new PointF(x + pts[i].X * 1.15f + 1.5f, y + pts[i].Y * 1.15f + 1.5f);
-            using (var b = new SolidBrush(Color.FromArgb(90, 0, 0, 0))) g.FillPolygon(b, pts);
-            for (int i = 0; i < pts.Length; i++) pts[i] = new PointF(pts[i].X - 1.5f, pts[i].Y - 1.5f);
-            using (var b = new SolidBrush(T.Cursor)) g.FillPolygon(b, pts);
-            using (var pen = new Pen(Color.White, 1.6f) { LineJoin = LineJoin.Round }) g.DrawPolygon(pen, pts);
-            string act = c.Action;
-            if (!string.IsNullOrEmpty(act))
-            {
-                float tw = T.Measure(g, act, 8.5f, true);
-                var chip = new RectangleF(BX + 8, BY + BH - 30, tw + 24, 22);
-                using (var p = T.Round(chip, 11)) using (var b = new SolidBrush(Color.FromArgb(215, 13, 17, 27))) g.FillPath(b, p);
-                using (var b = new SolidBrush(T.Cursor)) g.FillEllipse(b, chip.X + 8, chip.Y + 8, 6, 6);
-                T.Tx(g, act, 8.5f, true, Color.White, chip.X + 18, chip.Y, tw + 8, 22, 0, true, false);
-            }
-        }
-        g.Clip = oldClip;
-        using (var p = T.Round(body, 10)) using (var pen = new Pen(T.Line)) g.DrawPath(pen, p);
+        return null;
     }
 }
 
@@ -531,7 +675,7 @@ class App : Form
     volatile bool cancel = false;
     Ph ph = Ph.Idle; string title = "Hazır", detail = "Başlat'a basınca GSBWIFI'ye bağlanmayı dener."; int step = -1;
     Stopwatch sw = new Stopwatch();
-    Overlay ov; Cdp cdp;
+    volatile Ghost ghost; Cdp cdp;
 
     static string DataDir { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "GSBWifiOtomatik"); } }
 
@@ -559,7 +703,7 @@ class App : Form
         var brandS = new Label { Left = 74, Top = 48, AutoSize = true, Text = "Otomatik bağlantı", Font = new Font("Segoe UI", 8.5f), ForeColor = T.Muted, BackColor = T.Side };
         btn = new FlatBtn { Left = 20, Top = 100, Width = 180, Height = 50, Text = "Başlat", Fill = T.Green, Fill2 = Color.FromArgb(14, 165, 160), BackColor = T.Side, Font = new Font("Segoe UI Semibold", 12f) };
         var secHead = new Label { Left = 22, Top = 176, AutoSize = true, Text = "SEÇENEKLER", Font = new Font("Segoe UI Semibold", 8f), ForeColor = T.Muted, BackColor = T.Side };
-        swView = new Switch { Left = 20, Top = 198, Width = 180, Height = 54, Text = "Görüntü", Sub = "Sağ altta canlı göster", BackColor = T.Side };
+        swView = new Switch { Left = 20, Top = 198, Width = 180, Height = 54, Text = "Görüntü", Sub = "İkinci imleç ekranda gezsin", BackColor = T.Side };
         btnCred = new FlatBtn { Left = 20, Top = 440, Width = 180, Height = 40, Text = "Giriş bilgileri", Ghost = true, BackColor = T.Side };
         btnHide = new FlatBtn { Left = 20, Top = 492, Width = 180, Height = 40, Text = "Arka plana al", Ghost = true, BackColor = T.Side };
         side.Controls.AddRange(new Control[] { brand, brandT, brandS, btn, secHead, swView, btnCred, btnHide });
@@ -592,13 +736,14 @@ class App : Form
         btnCred.Click += (s, e) => FirstSetup();
         swView.Changed += (s, e) => { viewOn = swView.Checked; SaveSettings(); RefreshOverlay(); };
         FormClosing += (s, e) => { cancel = true; running = false; watch.Stop(); };
-        FormClosed += (s, e) => { tray.Visible = false; tray.Dispose(); if (ov != null) ov.Close(); CloseBrowser(); };
+        FormClosed += (s, e) => { tray.Visible = false; tray.Dispose(); if (ghost != null) ghost.Close(); CloseBrowser(); };
 
         if (T.S != 1f) Scale(new SizeF(T.S, T.S));
         LoadSettings(); swView.Checked = viewOn;
         Shown += (s, e) => {
 #if SELFTEST
             viewOn = true; swView.Checked = true; running = true; sw.Start(); RefreshOverlay(); UpdateButton();
+            if (Environment.GetEnvironmentVariable("GSB_DESKTEST") == "1") { EnsureGhost(); Task.Run(() => { bool ok = VisualWifi(true, null, null, true); Log("DESKTEST sonuç: " + ok); }); return; }
             Task.Run(() => { string r = BrowserLogin("deneme.kullanici", "gizli123"); Log("SELFTEST sonuç: " + r); });
             return;
 #else
@@ -652,7 +797,6 @@ class App : Form
         ph = p; title = t; detail = d;
         switch (p) { case Ph.Connect: case Ph.Reset: step = 0; break; case Ph.Page: step = 1; break; case Ph.Login: step = 2; break; case Ph.Done: step = 4; break; }
         string tt = t + " - " + d; tray.Text = tt.Length > 60 ? tt.Substring(0, 60) : tt;
-        if (ov != null) { ov.Title = t; ov.Sub = d; ov.Phase = p; }
         card.Invalidate();
     }
 
@@ -661,24 +805,22 @@ class App : Form
         btn.Text = running ? "Durdur" : "Başlat"; btn.Fill = running ? T.Red : T.Green; btn.Fill2 = running ? Color.FromArgb(249, 115, 22) : Color.FromArgb(14, 165, 160); btn.Invalidate();
     }
 
+    void EnsureGhost() { if (ghost == null || ghost.IsDisposed) { ghost = new Ghost(); ghost.Show(); ghost.Hide(); } }
+
     void RefreshOverlay()
     {
-        if (viewOn && running)
-        {
-            if (ov == null || ov.IsDisposed) ov = new Overlay();
-            ov.Title = title; ov.Sub = detail; ov.Phase = ph; ov.Cdp = cdp;
-            if (!ov.Visible) ov.Show();
-        }
-        else if (ov != null && ov.Visible) ov.Hide();
+        if (viewOn && running) EnsureGhost();
+        else if (ghost != null) ghost.Stop();
     }
 
     async Task TryStart()
     {
-        btn.Enabled = false; watch.Stop();
+        btn.Enabled = false; watch.Stop(); if (viewOn) EnsureGhost();
         SetState(Ph.Connect, "Wi-Fi kontrol ediliyor", "Kapalıysa açılır, sonra " + Ssid + " aranır");
         bool vis = false, changed = false;
         await Task.Run(() => {
-            changed = EnsureWifiOn();
+            if (viewOn && WifiIsOff()) { changed = true; VisualWifi(false, null, () => EnsureWifiOn()); EnsureWifiOn(); }
+            else changed = EnsureWifiOn();
             for (int i = 0; i < (changed ? 6 : 1) && !vis; i++) { vis = NetworkVisible(); if (!vis && changed) Thread.Sleep(2000); }
         });
         if (changed) Log("Wi-Fi kapalıydı, otomatik açıldı.");
@@ -727,7 +869,6 @@ class App : Form
     void CloseBrowser()
     {
         var c = cdp; cdp = null;
-        if (ov != null) ov.Cdp = null;
         if (c != null) c.Dispose();
     }
 
@@ -939,12 +1080,50 @@ class App : Form
         foreach (var f in new[] { "Login Data", "Login Data For Account", "Preferences", "Web Data" }) CopyShared(Path.Combine(src, prof, f), Path.Combine(dest, "Default", f));
     }
 
-    // Wi-Fi radyosu ya da kartı kapalıysa açar. Kapalıydıysa true döner.
-    static bool EnsureWifiOn()
+    static void Wait(Ghost g, int ms) { for (int t = 0; t < ms; t += 100) { g.Poke(); Thread.Sleep(100); } }
+
+    // Görüntü açıkken: ikinci imleç görev çubuğundaki Wi-Fi simgesine, sonra hızlı ayarlardaki Wi-Fi düğmesine tıklar.
+    // Simge gerçekten tıklanır (panel açılır, senin farene dokunulmaz). Düğme Windows'ta tıklanabilir bulunursa gerçekten tıklanır,
+    // bulunamazsa imleç düğmeye gider ve aynı anda işlem arka planda yapılır (doOff/doOn). Yapılamazsa false: normal yöntem devreye girer.
+    bool VisualWifi(bool reset, Action doOff, Action doOn, bool dry = false)
     {
-        const string ps = @"
+        var g = ghost; if (g == null || !viewOn) return false;
+        try {
+            var trayBtn = Desk.FindTrayButton();
+            if (trayBtn == null) { Log("Görev çubuğunda Wi-Fi simgesi bulunamadı, arka planda yapılıyor."); return false; }
+            bool win11 = (trayBtn.Current.ClassName ?? "").StartsWith("SystemTray");
+            var c = Desk.Center(trayBtn);
+            g.ChipLeft = false; g.Start(); g.Label = "Wi-Fi simgesine gidiliyor"; g.MoveTo(c.X, c.Y);
+            g.Tap("Wi-Fi simgesine tıklandı"); Desk.Press(trayBtn);
+            Wait(g, 700);
+            var tile = Desk.FindTile(1200); bool real = tile != null;
+            Point? target = real ? Desk.Center(tile) : (win11 ? Desk.EstimateTile() : null);
+            if (target == null) { Log("Hızlı ayarlardaki Wi-Fi düğmesinin yeri belirlenemedi (" + Desk.LastSeen + "), arka planda yapılıyor."); Desk.Esc(); return false; }
+            // Windows'un kendi paneli (hızlı ayarlar) her pencerenin üstünde çizilir; ikinci imleç panelin içinde görünemez.
+            // Bu yüzden imleç panelin hemen sol kenarında, düğmenin hizasında durur; işlem düğmede yapılır.
+            float panelLeft = Screen.PrimaryScreen.Bounds.Right - 372 * T.S;
+            float dockX = Math.Min(target.Value.X, panelLeft - 12 * T.S);
+            g.ChipLeft = true; g.Label = "Wi-Fi düğmesine gidiliyor"; g.MoveTo(dockX, target.Value.Y);
+            Action<bool> act = on => { if (dry) return; if (real) Desk.Press(tile); else { var f = on ? doOn : doOff; if (f != null) f(); } };
+            if (dry) { g.Tap("(deneme) Wi-Fi düğmesine tıklandı"); Log("Deneme: Wi-Fi düğmesine gidildi (" + (real ? "bulundu" : "tahmini yer") + "), dokunulmadı."); }
+            else if (reset) { g.Tap("Wi-Fi kapatılıyor"); act(false); Wait(g, 3500); g.Tap("Wi-Fi açılıyor"); act(true); }
+            else { g.Tap("Wi-Fi açılıyor"); act(true); }
+            Wait(g, dry ? 600 : 1500); g.Label = "Panel kapatılıyor"; Wait(g, 500); Desk.Esc(); g.ChipLeft = false; Thread.Sleep(300);
+            return true;
+        }
+        catch (Exception ex) { Log("İkinci imleçle Wi-Fi adımı yapılamadı (" + ex.Message + "), arka planda yapılıyor."); try { Desk.Esc(); } catch { } return false; }
+    }
+
+    // Wi-Fi radyosu ya da kartı kapalıysa açar. Kapalıydıysa true döner.
+    static bool EnsureWifiOn() { return RunWifiScript("on"); }
+    static bool WifiIsOff() { return RunWifiScript("check"); }
+
+    static bool RunWifiScript(string mode)
+    {
+        const string ps0 = @"
 $ErrorActionPreference='SilentlyContinue'
 $was=$false
+$mode='__MODE__'
 try {
   Add-Type -AssemblyName System.Runtime.WindowsRuntime
   $asTask=([System.WindowsRuntimeSystemExtensions].GetMethods() | ? { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' })[0]
@@ -953,11 +1132,12 @@ try {
   [Windows.Devices.Radios.RadioAccessStatus,Windows.System.Devices,ContentType=WindowsRuntime]|Out-Null
   Await ([Windows.Devices.Radios.Radio]::RequestAccessAsync()) ([Windows.Devices.Radios.RadioAccessStatus])|Out-Null
   $radios=Await ([Windows.Devices.Radios.Radio]::GetRadiosAsync()) ([System.Collections.Generic.IReadOnlyList[Windows.Devices.Radios.Radio]])
-  foreach($r in $radios){ if($r.Kind -eq 'WiFi' -and $r.State -ne 'On'){ $was=$true; Await ($r.SetStateAsync('On')) ([Windows.Devices.Radios.RadioAccessStatus])|Out-Null } }
+  foreach($r in $radios){ if($r.Kind -eq 'WiFi' -and $r.State -ne 'On'){ $was=$true; if($mode -eq 'on'){ Await ($r.SetStateAsync('On')) ([Windows.Devices.Radios.RadioAccessStatus])|Out-Null } } }
 } catch {}
-try { Get-NetAdapter -Physical | ? { $_.Status -eq 'Disabled' -and ($_.PhysicalMediaType -match '802.11' -or $_.InterfaceDescription -match 'Wi-?Fi|Wireless') } | % { $was=$true; Enable-NetAdapter -Name $_.Name -Confirm:$false } } catch {}
+try { Get-NetAdapter -Physical | ? { $_.Status -eq 'Disabled' -and ($_.PhysicalMediaType -match '802.11' -or $_.InterfaceDescription -match 'Wi-?Fi|Wireless') } | % { $was=$true; if($mode -eq 'on'){ Enable-NetAdapter -Name $_.Name -Confirm:$false } } } catch {}
 if($was){'WAS_OFF'}
 ";
+        string ps = ps0.Replace("__MODE__", mode);
         try {
             var psi = new ProcessStartInfo("powershell.exe", "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand " + Convert.ToBase64String(Encoding.Unicode.GetBytes(ps))) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true };
             var p = Process.Start(psi);
@@ -983,9 +1163,17 @@ if($was){'WAS_OFF'}
                 SetState(Ph.Page, "Tarayıcı hazırlanıyor", "Chrome arka planda açılıyor");
                 var c = new Cdp(); c.Cancelled = () => cancel;
                 if (user == null) c.Seed = SeedChromeProfile;
+                var gh = ghost;
+                if (viewOn && gh != null)
+                {
+                    c.InitScreen = new PointF(gh.X, gh.Y);
+                    c.GhostMove = (x, y) => gh.SetPos(x, y);
+                    c.GhostClick = () => { gh.ClickTicks = Environment.TickCount; gh.Poke(); };
+                    c.OnAction = t => { gh.Label = t; gh.Poke(); };
+                }
                 Directory.CreateDirectory(DataDir);
-                if (!c.Start(exe, DataDir)) { c.Dispose(); return cancel ? "cancel" : "nochrome"; }
-                cdp = c; var o = ov; if (o != null) o.Cdp = c;
+                if (!c.Start(exe, DataDir, viewOn && ghost != null)) { c.Dispose(); return cancel ? "cancel" : "nochrome"; }
+                cdp = c;
             }
             var b = cdp;
             SetState(Ph.Page, "Giriş sayfası açılıyor", PortalUrl.Replace("https://", ""));
@@ -1080,12 +1268,14 @@ if($was){'WAS_OFF'}
         }
         return "Wi-Fi";
     }
+    static string adapterNow = "Wi-Fi";
+    static void DisableAdapter() { adapterNow = AdapterName(); Netsh("interface set interface name=\"" + adapterNow + "\" admin=disabled"); }
+    static void EnableAdapter() { Netsh("interface set interface name=\"" + adapterNow + "\" admin=enabled"); }
     static void ResetAdapter()
     {
-        string n = AdapterName();
-        Netsh("interface set interface name=\"" + n + "\" admin=disabled");
+        DisableAdapter();
         Thread.Sleep(3000);
-        Netsh("interface set interface name=\"" + n + "\" admin=enabled");
+        EnableAdapter();
         Thread.Sleep(5000);
         Connect();
     }
@@ -1133,7 +1323,10 @@ if($was){'WAS_OFF'}
                 resets++;
                 SetState(Ph.Reset, "Wi-Fi kapatılıp açılıyor", "Sayfa açılana kadar yeniden denenecek (#" + resets + ")");
                 Log("Wi-Fi kapat/aç #" + resets);
-                await Task.Run(() => ResetAdapter());
+                await Task.Run(() => {
+                    if (viewOn && VisualWifi(true, DisableAdapter, EnableAdapter)) { EnsureWifiOn(); Thread.Sleep(5000); Connect(); }
+                    else { EnsureWifiOn(); ResetAdapter(); }
+                });
             } else {
                 bool vis = true;
                 await Task.Run(() => { vis = NetworkVisible(); });
