@@ -11,7 +11,7 @@ using System.Windows.Forms;
 class App : Form
 {
     const string Ssid = "GSBWIFI";
-    const int TickMs = 4000, FailsToKick = 3, ResetEvery = 3;
+    const int TickMs = 4000, FailsToKick = 3, ResetEvery = 1;
     Label lbl; TextBox box; Button btn, btnHide; NotifyIcon tray; System.Windows.Forms.Timer timer;
     int fails = 0, kicks = 0; bool running = true, busy = false, done = false;
 

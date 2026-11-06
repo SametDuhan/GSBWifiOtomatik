@@ -23,7 +23,7 @@ GSBWIFI'ye bağlanırken Windows sık sık şunu gösteriyor:
 1. Uygulamayı açarsın. Hemen çalışmaya başlar.
 2. 4 saniyede bir **gerçek internet var mı** diye bakar. Bunun için Microsoft'un bağlantı test adresini (`msftconnecttest.com`) kullanır. Windows'un "İnternet yok" kararını verirken baktığı kaynakla aynıdır.
 3. GSBWIFI'ye bağlı değilsen bağlanmayı dener.
-4. Bağlısın ama internet yoksa yaklaşık 12 saniye bekler. Hâlâ yoksa bağlantıyı kesip yeniden bağlanır. Üç denemede bir bunun yerine **Wi-Fi kartını kapatıp açar** (senin Wi-Fi anahtarını kapatıp açmana denk gelir). İnternet gelene kadar bunu tekrarlar.
+4. Bağlısın ama internet yoksa yaklaşık 12 saniye bekler. Hâlâ yoksa bağlantıyı kesip yeniden bağlanır. Bunun yerine her denemede **Wi-Fi kartını kapatıp açar** (senin Wi-Fi anahtarını kapatıp açmana denk gelir). İnternet gelene kadar bunu tekrarlar.
 5. **İnternet gelince** bildirim gösterir ve kendini kapatır.
 
 Pencerede anlık durum ve işlem kaydı görünür. **Arka plana al** ile görev çubuğu simgesine iner, simgeye çift tıklayınca geri gelir. **Durdur** ile döngüyü elle durdurabilirsin.
@@ -62,7 +62,7 @@ build.bat
 | `Ssid` | `GSBWIFI` | Bağlanılacak ağın adı |
 | `TickMs` | `4000` | Kontrol aralığı (milisaniye) |
 | `FailsToKick` | `3` | Kaç başarısız kontrolden sonra kopar/bağlan yapılacağı |
-| `ResetEvery` | `3` | Kaç kopar/bağlan denemesinde bir Wi-Fi kartının kapatıp açılacağı |
+| `ResetEvery` | `1` | Kaç denemede bir Wi-Fi kartının kapatıp açılacağı (1 = her denemede, 3 = üç denemede bir, aradakilerde sadece kopar/bağlan) |
 
 Başka bir açık ağda da aynı sorunu yaşıyorsan `Ssid` değerini değiştirip yeniden derlemen yeterli.
 
