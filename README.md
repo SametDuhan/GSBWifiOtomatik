@@ -34,7 +34,7 @@ Chrome bulunamazsa Edge, o da yoksa doğrudan form gönderimi denenir.
 
 - **Solda:** Başlat / Durdur, **Görüntü** anahtarı, giriş bilgileri, arka plana alma.
 - **Ortada:** o an ne olduğu (büyük durum, dört adımlı ilerleme çizgisi, deneme / Wi-Fi yenileme / süre sayaçları) ve altında kayıt.
-- **Görüntü açıkken (sağ altta):** uygulamanın bağlanmaya çalışırken Chrome'da yaptığı her şey canlı görünür. Sayfa, yazılan alanlar ve tıklamalar **ikinci, pembe bir sanal imleçle** gösterilir. Senin gerçek farene dokunulmaz, o pencere tıklanamaz ve odağı çalmaz. Anahtar durumu hatırlanır.
+- **Görüntü açıkken (sağ altta):** uygulamanın bağlanmaya çalışırken Chrome'da yaptığı her şey canlı görünür. Sayfa, yazılan alanlar ve tıklamalar **ikinci, pembe bir sanal imleçle** gösterilir. Senin gerçek farene dokunulmaz, o pencere tıklanamaz ve odağı çalmaz. Anahtar durumu hatırlanır. Kullanıcı adı ve şifre alanlarındaki yazı **noktayla maskelenir**, ekran kaydı alsan bile okunmaz.
 
 ## Kullanım
 

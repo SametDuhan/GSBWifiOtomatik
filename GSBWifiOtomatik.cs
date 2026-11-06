@@ -115,6 +115,10 @@ class Cdp : IDisposable
                     if (!ws.ConnectAsync(new Uri(url), CancellationToken.None).Wait(6000)) throw new IOException("ws");
                     Call("Page.enable");
                     Call("Emulation.setDeviceMetricsOverride", new Dictionary<string, object> { { "width", VW }, { "height", VH }, { "deviceScaleFactor", 1 }, { "mobile", false } });
+                    // Canlı görünümde kullanıcı adı ve şifre okunmasın: giriş alanlarındaki yazı noktaya çevrilir (gönderilen değer değişmez)
+                    Call("Page.addScriptToEvaluateOnNewDocument", new Dictionary<string, object> { { "source",
+                        "(function(){function m(){var s=document.createElement('style');s.textContent='input:not([type=submit]):not([type=button]):not([type=checkbox]):not([type=radio]):not([type=hidden]){-webkit-text-security:disc !important;}';(document.head||document.documentElement).appendChild(s);}" +
+                        "if(document.documentElement)m();else document.addEventListener('DOMContentLoaded',m);})();" } });
                     return true;
                 }
                 catch { }
