@@ -15,6 +15,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
+using Microsoft.Win32;
+using System.Management;
 
 // ============================================================================
 //  GSBWIFI Otomatik Bağlantı
@@ -85,6 +87,9 @@ class Cdp : IDisposable
         var list = new List<string>();
         foreach (var b in new[] { pf, pf86, la }) if (!string.IsNullOrEmpty(b)) list.Add(Path.Combine(b, @"Google\Chrome\Application\chrome.exe"));
         foreach (var b in new[] { pf86, pf }) if (!string.IsNullOrEmpty(b)) list.Add(Path.Combine(b, @"Microsoft\Edge\Application\msedge.exe"));
+        foreach (var hive in new[] { Registry.LocalMachine, Registry.CurrentUser })
+            foreach (var exe in new[] { "chrome.exe", "msedge.exe" })
+                try { var v = hive.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\" + exe); string path = v == null ? null : v.GetValue("") as string; if (!string.IsNullOrEmpty(path)) list.Add(path); } catch { }
         foreach (var p in list) if (File.Exists(p)) return p;
         return null;
     }
@@ -693,12 +698,25 @@ class App : Form
 
     RichTextBox box; FlatBtn btn, btnHide, btnCred; Switch swView; Card card; Label logHead;
     NotifyIcon tray; System.Windows.Forms.Timer timer, animTimer, watch;
-    int attempts = 0, resets = 0, loginFails = 0, missCount = 0; float anim = 0;
+    int attempts = 0, resets = 0, loginFails = 0, missCount = 0, logCount = 0; float anim = 0;
     bool running = false, busy = false, done = false, viewOn = false;
     volatile bool cancel = false;
     Ph ph = Ph.Idle; string title = "Hazır", detail = "Başlat'a basınca GSBWIFI'ye bağlanmayı dener."; int step = -1;
     Stopwatch sw = new Stopwatch();
     volatile Ghost ghost; Cdp cdp;
+
+    // Uygulama beklenmedik kapandıysa geride kalmış, bizim profilimizle açılmış Chrome'ları kapatır
+    static void KillStaleChrome()
+    {
+        try {
+            using (var q = new ManagementObjectSearcher("SELECT ProcessId, CommandLine FROM Win32_Process WHERE Name='chrome.exe' OR Name='msedge.exe'"))
+                foreach (ManagementObject o in q.Get()) {
+                    string cl = o["CommandLine"] as string; if (cl == null) continue;
+                    if (cl.IndexOf("remote-debugging-port", StringComparison.OrdinalIgnoreCase) >= 0 && cl.IndexOf("GSBWifiOtomatik", StringComparison.OrdinalIgnoreCase) >= 0 && cl.IndexOf("--type=", StringComparison.Ordinal) < 0)
+                        try { var k = Process.Start(new ProcessStartInfo("taskkill", "/PID " + o["ProcessId"] + " /T /F") { UseShellExecute = false, CreateNoWindow = true }); if (k != null) k.WaitForExit(3000); } catch { }
+                }
+        } catch { }
+    }
 
     static string DataDir { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "GSBWifiOtomatik"); } }
 
@@ -707,6 +725,9 @@ class App : Form
     [STAThread] static void Main(string[] args)
     {
         Demo = Array.IndexOf(args, "--demo") >= 0;
+        bool first; var single = new Mutex(true, "Global\\GSBWifiOtomatik_TekKopya", out first);
+        if (!first && !Demo) { MessageBox.Show("GSBWIFI Otomatik zaten çalışıyor. Görev çubuğunun sağındaki simge alanına bak.", "GSBWIFI Otomatik", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+        if (first) KillStaleChrome();
         try { SetProcessDPIAware(); } catch { }
         using (var gg = Graphics.FromHwnd(IntPtr.Zero)) T.S = gg.DpiX / 96f;
         ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072 | SecurityProtocolType.Tls;
@@ -760,7 +781,7 @@ class App : Form
         btnCred.Click += (s, e) => FirstSetup();
         swView.Changed += (s, e) => { viewOn = swView.Checked; SaveSettings(); RefreshOverlay(); };
         FormClosing += (s, e) => { cancel = true; running = false; watch.Stop(); };
-        FormClosed += (s, e) => { tray.Visible = false; tray.Dispose(); if (ghost != null) ghost.Close(); CloseBrowser(); };
+        FormClosed += (s, e) => { tray.Visible = false; tray.Dispose(); if (ghost != null) ghost.Close(); CloseBrowser(); if (adapterOffByUs) EnableAdapter(); };
 
         if (T.S != 1f) Scale(new SizeF(T.S, T.S));
         LoadSettings(); swView.Checked = viewOn;
@@ -837,7 +858,9 @@ class App : Form
         if (Regex.IsMatch(m, "internet var|açıldı|tıklandı|kaydedildi|Başladı", RegexOptions.IgnoreCase)) c = Color.FromArgb(110, 231, 160);
         else if (Regex.IsMatch(m, "hata|açılmadı|yanlış|bulunamadı|kapat/aç|gelmedi", RegexOptions.IgnoreCase)) c = Color.FromArgb(251, 191, 100);
         box.SelectionStart = box.TextLength; box.SelectionColor = T.Muted; box.AppendText("[" + DateTime.Now.ToString("HH:mm:ss") + "] ");
-        box.SelectionColor = c; box.AppendText(m + Environment.NewLine); box.SelectionStart = box.TextLength; box.ScrollToCaret();
+        box.SelectionColor = c; box.AppendText(m + Environment.NewLine);
+        if (++logCount % 40 == 0 && box.Lines.Length > 500) { box.Select(0, box.GetFirstCharIndexFromLine(150)); box.SelectedText = ""; }
+        box.SelectionStart = box.TextLength; box.ScrollToCaret();
     }
 
     void SetState(Ph p, string t, string d)
@@ -873,6 +896,7 @@ class App : Form
             for (int i = 0; i < (changed ? 6 : 1) && !vis; i++) { vis = NetworkVisible(); if (!vis && changed) Thread.Sleep(2000); }
         });
         if (changed) Log("Wi-Fi kapalıydı, otomatik açıldı.");
+        if (vis && ListUnknown) Log("Ağ listesi okunamadı (Windows konum izni kapalı olabilir), doğrudan bağlanılacak.");
         if (cancel && !running && ph == Ph.Stopped) { btn.Enabled = true; return; }
         if (vis) { btn.Enabled = true; StartRun(); } else EnterWait();
     }
@@ -881,8 +905,13 @@ class App : Form
     void EnterWait()
     {
         running = false; step = -1; sw.Stop(); btn.Enabled = false; UpdateButton();
-        SetState(Ph.Warn, Ssid + " ağı bulunamadı", "Wi-Fi listesinde " + Ssid + " görünmüyor. Ağın menzilinde olduğundan emin ol. Görününce Başlat açılacak.");
-        Log(Ssid + " Wi-Fi listesinde yok. Bekleniyor...");
+        if (!HasWifiAdapter()) {
+            SetState(Ph.Warn, "Wi-Fi kartı bulunamadı", "Bu bilgisayarda kablosuz ağ kartı görünmüyor. Wi-Fi'lı bir bilgisayarda kullan.");
+            Log("Bu bilgisayarda Wi-Fi kartı yok.");
+        } else {
+            SetState(Ph.Warn, Ssid + " ağı bulunamadı", "Wi-Fi listesinde " + Ssid + " görünmüyor. Ağın menzilinde olduğundan emin ol. Görününce Başlat açılacak.");
+            Log(Ssid + " Wi-Fi listesinde yok. Bekleniyor...");
+        }
         RefreshOverlay(); watch.Start();
     }
 
@@ -1030,13 +1059,43 @@ class App : Form
         } catch { return ""; }
     }
     // Hedef ağ Wi-Fi listesinde görünüyor mu?
+    public static volatile bool ListUnknown = false;
+    // GSBWIFI listede görünüyor mu? Liste okunamıyorsa (ör. Windows 11'de konum izni kapalı) engellemez, doğrudan bağlanmayı dener.
     static bool NetworkVisible()
     {
-        foreach (var l in Netsh("wlan show networks").Split('\n')) {
+        string o = Netsh("wlan show networks"); bool any = false, found = false;
+        foreach (var l in o.Split('\n')) {
             var m = Regex.Match(l, @"^\s*SSID\s+\d+\s*:\s*(.+?)\s*$");
-            if (m.Success && string.Equals(m.Groups[1].Value, Ssid, StringComparison.OrdinalIgnoreCase)) return true;
+            if (!m.Success) continue; any = true;
+            if (string.Equals(m.Groups[1].Value, Ssid, StringComparison.OrdinalIgnoreCase)) found = true;
         }
-        return false;
+        ListUnknown = !any && (o.Trim().Length == 0 || Regex.IsMatch(o, "konum|location|permission|izin|elevat|yükseltilmiş", RegexOptions.IgnoreCase));
+        return found || ListUnknown;
+    }
+
+    // Bilgisayarda Wi-Fi kartı var mı (kapalı olsa bile)?
+    static bool HasWifiAdapter()
+    {
+        try { foreach (var n in System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces()) if (n.NetworkInterfaceType == System.Net.NetworkInformation.NetworkInterfaceType.Wireless80211) return true; return false; }
+        catch { return true; }
+    }
+
+    // GSBWIFI profili kayıtlı değilse ve ağ açık (şifresiz) görünüyorsa profil eklenir; aksi halde bağlanmak mümkün olmaz.
+    static void EnsureProfile()
+    {
+        try {
+            if (Regex.IsMatch(Netsh("wlan show profiles"), @":\s*" + Regex.Escape(Ssid) + @"\s*$", RegexOptions.Multiline | RegexOptions.IgnoreCase)) return;
+            bool open = false, inBlock = false;
+            foreach (var l in Netsh("wlan show networks").Split('\n')) {
+                var m = Regex.Match(l, @"^\s*SSID\s+\d+\s*:\s*(.+?)\s*$");
+                if (m.Success) { inBlock = string.Equals(m.Groups[1].Value, Ssid, StringComparison.OrdinalIgnoreCase); continue; }
+                if (inBlock && Regex.IsMatch(l, @":\s*(Open|A.{1,3}k)\s*$", RegexOptions.IgnoreCase)) open = true;
+            }
+            if (!open) return;
+            string xml = "<?xml version=\"1.0\"?><WLANProfile xmlns=\"http://www.microsoft.com/networking/WLAN/profile/v1\"><name>" + Ssid + "</name><SSIDConfig><SSID><name>" + Ssid + "</name></SSID></SSIDConfig><connectionType>ESS</connectionType><connectionMode>manual</connectionMode><MSM><security><authEncryption><authentication>open</authentication><encryption>none</encryption><useOneX>false</useOneX></authEncryption></security></MSM></WLANProfile>";
+            string f = Path.Combine(Path.GetTempPath(), "gsbwifi-profil.xml");
+            File.WriteAllText(f, xml, new UTF8Encoding(false)); Netsh("wlan add profile filename=\"" + f + "\""); try { File.Delete(f); } catch { }
+        } catch { }
     }
     static string CurrentSsid()
     {
@@ -1046,13 +1105,19 @@ class App : Form
         }
         return null;
     }
+    // Bazı ağlar tek bir test adresini engelleyebilir: iki bağımsız adresle bakılır
     static bool Internet()
     {
         try {
             var r = (HttpWebRequest)WebRequest.Create("http://www.msftconnecttest.com/connecttest.txt");
-            r.Timeout = 3000; r.AllowAutoRedirect = false; r.Proxy = null;
+            r.Timeout = 2500; r.AllowAutoRedirect = false; r.Proxy = null;
             using (var resp = r.GetResponse()) using (var sr = new StreamReader(resp.GetResponseStream()))
-                return sr.ReadToEnd().Trim() == "Microsoft Connect Test";
+                if (sr.ReadToEnd().Trim() == "Microsoft Connect Test") return true;
+        } catch { }
+        try {
+            var r = (HttpWebRequest)WebRequest.Create("http://clients3.google.com/generate_204");
+            r.Timeout = 2500; r.AllowAutoRedirect = false; r.Proxy = null;
+            using (var resp = (HttpWebResponse)r.GetResponse()) return resp.StatusCode == HttpStatusCode.NoContent;
         } catch { return false; }
     }
 
@@ -1324,8 +1389,9 @@ if($was){'WAS_OFF'}
         return "Wi-Fi";
     }
     static string adapterNow = "Wi-Fi";
-    static void DisableAdapter() { adapterNow = AdapterName(); Netsh("interface set interface name=\"" + adapterNow + "\" admin=disabled"); }
-    static void EnableAdapter() { Netsh("interface set interface name=\"" + adapterNow + "\" admin=enabled"); }
+    static volatile bool adapterOffByUs = false;
+    static void DisableAdapter() { adapterOffByUs = true; adapterNow = AdapterName(); Netsh("interface set interface name=\"" + adapterNow + "\" admin=disabled"); }
+    static void EnableAdapter() { adapterOffByUs = false; Netsh("interface set interface name=\"" + adapterNow + "\" admin=enabled"); }
     static void ResetAdapter()
     {
         DisableAdapter();
@@ -1334,7 +1400,7 @@ if($was){'WAS_OFF'}
         Thread.Sleep(5000);
         Connect();
     }
-    static void Connect() { Netsh("wlan connect name=\"" + Ssid + "\" ssid=\"" + Ssid + "\""); }
+    static void Connect() { EnsureProfile(); Netsh("wlan connect name=\"" + Ssid + "\" ssid=\"" + Ssid + "\""); }
 
     async Task Finish()
     {
@@ -1373,7 +1439,15 @@ if($was){'WAS_OFF'}
                     SetState(Ph.Warn, "Bilgiler otomatik dolmadı", "Chrome kayıtlı bilgileri getirmedi. 'Giriş bilgileri'nden bilgilerini elle gir.");
                     Log("Chrome'da kayıtlı bilgiler bulunamadı, bilgileri elle girmen gerek."); return;
                 }
-                if (res == "failed") { loginFails++; Log("Giriş gönderildi ama internet gelmedi." + (loginFails >= 3 ? " Bilgiler yanlış olabilir, kontrol et." : "")); }
+                if (res == "failed") {
+                    loginFails++; Log("Giriş gönderildi ama internet gelmedi (" + loginFails + ").");
+                    if (loginFails >= 4) {
+                        StopRun();
+                        SetState(Ph.Warn, "Giriş sonuç vermedi", "Giriş 4 kez denendi ama internet gelmedi. Bilgiler yanlış ya da hesap bloke olabilir. Kontrol edip Başlat'a bas.");
+                        Log("Hesabı kilitlememek için duruldu: giriş 4 kez başarısız.");
+                        return;
+                    }
+                }
                 else Log("Giriş sayfası açılmadı.");
                 resets++;
                 SetState(Ph.Reset, "Wi-Fi kapatılıp açılıyor", "Sayfa açılana kadar yeniden denenecek (#" + resets + ")");

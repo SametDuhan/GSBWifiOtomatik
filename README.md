@@ -93,6 +93,27 @@ build.bat
 
 Başka bir açık ağda da aynı sorunu yaşıyorsan `Ssid` değerini değiştirip yeniden derlemen yeterli.
 
+## Olası sorunlar ve alınan önlemler
+
+| Sorun | Ne yapılıyor |
+|---|---|
+| Uygulama iki kez açılırsa ikisi Wi-Fi'ı birbirine karşı yönetir | Tek kopya çalışır, ikincisi uyarı verip kapanır |
+| Windows 11'de konum izni kapalıyken ağ listesi boş okunur | Liste okunamıyorsa "ağ yok" denmez, doğrudan bağlanmayı dener ve bunu kayda yazar |
+| GSBWIFI profili bilgisayarda kayıtlı değil | Ağ açık (şifresiz) görünüyorsa profil kendiliğinden eklenir |
+| Bilgisayarda Wi-Fi kartı yok | "Wi-Fi kartı bulunamadı" uyarısı, Başlat gri kalır |
+| Ağ tek bir test adresini engeller, internet var ama yok sanılır | İki ayrı adresle kontrol edilir |
+| Yanlış şifreyle tekrar tekrar giriş hesabı kilitleyebilir | Giriş 4 kez sonuçsuz kalırsa durur ve uyarır |
+| Wi-Fi kapatılmışken uygulama kapanırsa Wi-Fi kapalı kalır | Çıkışta kartı geri açar, bir sonraki açılışta da kapalıysa açar |
+| Uygulama beklenmedik kapanırsa arkada Chrome kalır | Bir sonraki açılışta uygulamanın açtığı Chrome kapatılır |
+| Chrome standart klasörde değil | Kayıt defterinden de aranır, yoksa Edge kullanılır |
+| Saatlerce açık kalınca kayıt listesi şişer | Kayıt satırları sınırlıdır |
+
+Bilinen sınırlar:
+
+- Yeni Chrome sürümlerinde kayıtlı şifreler Chrome'a bağlı şifrelenebilir. Böyle bir bilgisayarda "Chrome'da kayıtlı" seçeneği bilgileri getiremeyebilir. Uygulama bunu fark edip bilgileri elle girmeni ister.
+- İmzasız bir uygulama olduğu için virüs koruması ya da SmartScreen ilk açılışta uyarı verebilir.
+- Giriş sayfasının yapısı ya da düğme yazısı değişirse güncelleme gerekir.
+
 ## Sınırlar
 
 - Giriş sayfası değişirse (alan adları, adres, düğme yazısı) uygulamanın güncellenmesi gerekir. Captcha ya da SMS kodu varsa giremez. Tarayıcı, `%APPDATA%\GSBWifiOtomatik\chrome` altındaki ayrı bir profille çalışır, kendi Chrome'una dokunmaz.
