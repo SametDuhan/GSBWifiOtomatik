@@ -21,7 +21,7 @@ GSBWIFI'ye bağlanırken Windows sık sık şunu gösteriyor:
 ## Ne yapar?
 
 1. Uygulamayı **sen açınca** çalışmaya başlar. Windows ile birlikte kendiliğinden başlamaz.
-2. **Başlat**'a basınca Wi-Fi kapalıysa kendisi açar, sonra GSBWIFI'yi arar. Ağ listede yoksa Başlat gri olur ve hata gösterilir, ağ görününce açılır.
+2. **Başlat**'a basınca Wi-Fi kapalıysa kendisi açar, sonra GSBWIFI'yi arar. Ağ listede yoksa Başlat gri olur ve hata gösterilir. Ağ görünür görünmez uygulama kendiliğinden başlar.
 3. 4 saniyede bir **gerçek internet var mı** diye bakar (`msftconnecttest.com`, Windows'un kendi kullandığı kaynak).
 4. GSBWIFI'ye bağlı değilsen bağlanmayı dener.
 5. Bağlısın ama internet yoksa **giriş sayfasını (`wifi.gsb.gov.tr`) arka planda Chrome ile açar**. Sayfa açılırsa kullanıcı adı ve şifreyi yazar, **Giriş** düğmesine tıklar.

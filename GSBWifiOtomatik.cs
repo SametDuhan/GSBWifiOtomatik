@@ -705,6 +705,11 @@ class App : Form
     Stopwatch sw = new Stopwatch();
     volatile Ghost ghost; Cdp cdp;
 
+    static void CrashLog(Exception ex)
+    {
+        try { Directory.CreateDirectory(DataDir); File.AppendAllText(Path.Combine(DataDir, "hata.log"), DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + "  " + (ex == null ? "bilinmeyen hata" : ex.ToString()) + Environment.NewLine + Environment.NewLine); } catch { }
+    }
+
     // Uygulama beklenmedik kapandıysa geride kalmış, bizim profilimizle açılmış Chrome'ları kapatır
     static void KillStaleChrome()
     {
@@ -731,6 +736,9 @@ class App : Form
         try { SetProcessDPIAware(); } catch { }
         using (var gg = Graphics.FromHwnd(IntPtr.Zero)) T.S = gg.DpiX / 96f;
         ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072 | SecurityProtocolType.Tls;
+        Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+        Application.ThreadException += (s, e) => CrashLog(e.Exception);
+        AppDomain.CurrentDomain.UnhandledException += (s, e) => { CrashLog(e.ExceptionObject as Exception); if (adapterOffByUs) EnableAdapter(); };
         Application.EnableVisualStyles(); Application.Run(new App());
     }
 
@@ -906,7 +914,7 @@ class App : Form
     {
         running = false; step = -1; sw.Stop(); btn.Enabled = false; UpdateButton();
         if (!HasWifiAdapter()) {
-            SetState(Ph.Warn, "Wi-Fi kartı bulunamadı", "Bu bilgisayarda kablosuz ağ kartı görünmüyor. Wi-Fi'lı bir bilgisayarda kullan.");
+            SetState(Ph.Warn, "Wi-Fi kartı bulunamadı", "Kablosuz ağ kartı görünmüyor. Uçak modunun ve Wi-Fi donanım anahtarının (Fn tuşu) kapalı olduğundan emin ol; masaüstü bilgisayarda Wi-Fi kartı gerekir.");
             Log("Bu bilgisayarda Wi-Fi kartı yok.");
         } else {
             SetState(Ph.Warn, Ssid + " ağı bulunamadı", "Wi-Fi listesinde " + Ssid + " görünmüyor. Ağın menzilinde olduğundan emin ol. Görününce Başlat açılacak.");
@@ -922,8 +930,8 @@ class App : Form
         await Task.Run(() => { vis = NetworkVisible(); });
         if (!vis || running) return;
         watch.Stop(); btn.Enabled = true;
-        SetState(Ph.Idle, Ssid + " bulundu", "Başlat'a basarak bağlanmayı başlatabilirsin.");
-        Log(Ssid + " ağı göründü. Başlat'a basabilirsin.");
+        Log(Ssid + " ağı göründü, otomatik başlatılıyor.");
+        StartRun();
     }
 
     void StartRun()
@@ -1259,7 +1267,10 @@ if($was){'WAS_OFF'}
 ";
         string ps = ps0.Replace("__MODE__", mode);
         try {
-            var psi = new ProcessStartInfo("powershell.exe", "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand " + Convert.ToBase64String(Encoding.Unicode.GetBytes(ps))) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true };
+            Directory.CreateDirectory(DataDir);
+            string file = Path.Combine(DataDir, "wifi-" + mode + ".ps1");
+            File.WriteAllText(file, ps, new UTF8Encoding(true));
+            var psi = new ProcessStartInfo("powershell.exe", "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"" + file + "\"") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true };
             var p = Process.Start(psi);
             string o = p.StandardOutput.ReadToEnd();
             if (!p.WaitForExit(30000)) { try { p.Kill(); } catch { } }
