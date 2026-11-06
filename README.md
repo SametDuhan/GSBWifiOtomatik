@@ -21,11 +21,12 @@ GSBWIFI'ye bağlanırken Windows sık sık şunu gösteriyor:
 ## Ne yapar?
 
 1. Uygulamayı **sen açınca** çalışmaya başlar. Windows ile birlikte kendiliğinden başlamaz.
-2. 4 saniyede bir **gerçek internet var mı** diye bakar (`msftconnecttest.com`, Windows'un kendi kullandığı kaynak).
-3. GSBWIFI'ye bağlı değilsen bağlanmayı dener.
-4. Bağlısın ama internet yoksa **giriş sayfasını (`wifi.gsb.gov.tr`) arka planda Chrome ile açar**. Sayfa açılırsa kullanıcı adı ve şifreyi yazar, **Giriş** düğmesine tıklar.
-5. Sayfa açılmazsa ya da giriş sonrası internet gelmezse **Wi-Fi kartını kapatıp açar**, yeniden bağlanır ve giriş sayfası açılana kadar bunu tekrarlar.
-6. **İnternet gelince** bildirim gösterir, birkaç saniye sonra kendini kapatır.
+2. **Başlat**'a basınca Wi-Fi kapalıysa kendisi açar, sonra GSBWIFI'yi arar. Ağ listede yoksa Başlat gri olur ve hata gösterilir, ağ görününce açılır.
+3. 4 saniyede bir **gerçek internet var mı** diye bakar (`msftconnecttest.com`, Windows'un kendi kullandığı kaynak).
+4. GSBWIFI'ye bağlı değilsen bağlanmayı dener.
+5. Bağlısın ama internet yoksa **giriş sayfasını (`wifi.gsb.gov.tr`) arka planda Chrome ile açar**. Sayfa açılırsa kullanıcı adı ve şifreyi yazar, **Giriş** düğmesine tıklar.
+6. Sayfa açılmazsa ya da giriş sonrası internet gelmezse **Wi-Fi kartını kapatıp açar**, yeniden bağlanır ve giriş sayfası açılana kadar bunu tekrarlar.
+7. **İnternet gelince** bildirim gösterir, birkaç saniye sonra kendini kapatır.
 
 Chrome bulunamazsa Edge, o da yoksa doğrudan form gönderimi denenir.
 
@@ -51,7 +52,14 @@ Chrome bulunamazsa Edge, o da yoksa doğrudan form gönderimi denenir.
 - **Yönetici izni**: Wi-Fi kartını kapatıp açmak için gerekir. Uygulama her açılışta Windows'un izin penceresini gösterir.
 - Ek bir şey yok. Uygulama Windows ile gelen .NET Framework 4 üzerinde çalışır.
 
-## Giriş bilgileri nerede duruyor?
+## Giriş bilgileri
+
+İlk açılışta iki seçenek sorulur (**Giriş bilgileri** düğmesinden sonradan değiştirilir):
+
+- **Chrome'da bilgilerim kayıtlı:** Giriş sayfasında kullanıcı adı ve şifre Chrome'dan kendiliğinden doluyorsa bunu seç. Uygulama, Chrome profilinden kayıtlı şifre dosyalarını geçici bir klasöre kopyalar, sayfa dolunca Giriş'e basar ve klasörü siler. Chrome doldurmazsa bilgileri elle girmeni ister.
+- **Bilgilerimi gireyim:** Kullanıcı adı ve şifre bir kez sorulur.
+
+## Elle girilen bilgiler nerede duruyor?
 
 - İlk açılışta bir kez sorulur, sonra sorulmaz. **Giriş bilgilerini değiştir** düğmesiyle güncellenir.
 - Bilgiler `%APPDATA%\GSBWifiOtomatik\kimlik.dat` dosyasında, Windows'un kullanıcıya özel şifrelemesiyle (DPAPI) saklanır. Dosya yalnızca senin Windows hesabınla açılabilir.

@@ -70,6 +70,7 @@ class Cdp : IDisposable
     public volatile float CurX = VW * 0.82f, CurY = VH * 0.92f;
     public long ClickTicks = 0;
     public volatile string Action = "";
+    public Action<string> Seed;
     public Func<bool> Cancelled = () => false;
 
     public bool Alive { get { try { return proc != null && !proc.HasExited && ws != null && ws.State == WebSocketState.Open; } catch { return false; } } }
@@ -96,6 +97,7 @@ class Cdp : IDisposable
         try { foreach (var d in Directory.GetDirectories(baseDir, "chrome*")) try { Directory.Delete(d, true); } catch { } } catch { }
         string profile = Path.Combine(baseDir, "chrome-" + Process.GetCurrentProcess().Id + "-" + Environment.TickCount);
         profileDir = profile;
+        if (Seed != null) { try { Directory.CreateDirectory(profile); Seed(profile); } catch { } }
         foreach (bool noSandbox in new[] { false, true })
         {
             int port = FreePort();
@@ -252,6 +254,13 @@ class Cdp : IDisposable
         Action = "Tıklandı: " + what;
         Click();
         return true;
+    }
+
+    public void Key(string key, int vk)
+    {
+        foreach (var t in new[] { "keyDown", "keyUp" })
+            Call("Input.dispatchKeyEvent", new Dictionary<string, object> { { "type", t }, { "key", key }, { "code", key }, { "windowsVirtualKeyCode", vk }, { "nativeVirtualKeyCode", vk } });
+        Thread.Sleep(120);
     }
 
     public void TypeText(string text, string what)
@@ -513,7 +522,7 @@ class App : Form
 
     RichTextBox box; FlatBtn btn, btnHide, btnCred; Switch swView; Card card; Label logHead;
     NotifyIcon tray; System.Windows.Forms.Timer timer, animTimer, watch;
-    int attempts = 0, resets = 0, loginFails = 0; float anim = 0;
+    int attempts = 0, resets = 0, loginFails = 0, missCount = 0; float anim = 0;
     bool running = false, busy = false, done = false, viewOn = false;
     volatile bool cancel = false;
     Ph ph = Ph.Idle; string title = "Hazır", detail = "Başlat'a basınca GSBWIFI'ye bağlanmayı dener."; int step = -1;
@@ -576,7 +585,7 @@ class App : Form
 
         btn.Click += (s, e) => { if (running) StopRun(); else { var _t = TryStart(); } };
         btnHide.Click += (s, e) => Hide();
-        btnCred.Click += (s, e) => { if (AskCred(this)) Log("Giriş bilgileri kaydedildi."); };
+        btnCred.Click += (s, e) => FirstSetup();
         swView.Changed += (s, e) => { viewOn = swView.Checked; SaveSettings(); RefreshOverlay(); };
         FormClosing += (s, e) => { cancel = true; running = false; watch.Stop(); };
         FormClosed += (s, e) => { tray.Visible = false; tray.Dispose(); if (ov != null) ov.Close(); CloseBrowser(); };
@@ -589,19 +598,36 @@ class App : Form
             Task.Run(() => { string r = BrowserLogin("deneme.kullanici", "gizli123"); Log("SELFTEST sonuç: " + r); });
             return;
 #else
-            string u, p;
-            if (!LoadCred(out u, out p)) {
-                MessageBox.Show(this, "Giriş sayfasında senin yerine 'Giriş'e basabilmem için kullanıcı adı ve şifreni bir kez girmen gerekiyor.", "GSBWIFI Otomatik", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                if (AskCred(this)) Log("Giriş bilgileri kaydedildi."); else Log("Giriş bilgisi girilmedi, giriş sayfası otomatik geçilemez.");
-            }
+            string u0, p0; bool has = LoadCred(out u0, out p0);
+            if (credMode == "" && has) { credMode = "manual"; SaveSettings(); }
+            if (credMode == "" || (credMode == "manual" && !has)) FirstSetup();
             var _t = TryStart();
 #endif
         };
     }
 
     // ---- ayarlar ----
-    void LoadSettings() { try { viewOn = File.ReadAllText(Path.Combine(DataDir, "ayar.txt")).Contains("view=1"); } catch { } }
-    void SaveSettings() { try { Directory.CreateDirectory(DataDir); File.WriteAllText(Path.Combine(DataDir, "ayar.txt"), "view=" + (viewOn ? "1" : "0")); } catch { } }
+    string credMode = ""; // "" = sorulmadı, "chrome" = Chrome'da kayıtlı, "manual" = uygulamaya girildi
+    void LoadSettings()
+    {
+        try {
+            string t = File.ReadAllText(Path.Combine(DataDir, "ayar.txt"));
+            viewOn = t.Contains("view=1");
+            var m = Regex.Match(t, @"mode=(\w+)"); if (m.Success) credMode = m.Groups[1].Value;
+        } catch { }
+    }
+    void SaveSettings() { try { Directory.CreateDirectory(DataDir); File.WriteAllText(Path.Combine(DataDir, "ayar.txt"), "view=" + (viewOn ? "1" : "0") + "\nmode=" + credMode); } catch { } }
+
+    // İlk kurulum / "Giriş bilgileri" düğmesi: bilgiler Chrome'da mı kayıtlı, yoksa elle mi girilecek?
+    void FirstSetup()
+    {
+        int m = AskMode(this);
+        if (m == 1) { credMode = "chrome"; SaveSettings(); Log("Chrome'da kayıtlı bilgiler kullanılacak."); }
+        else if (m == 2) {
+            if (AskCred(this)) { credMode = "manual"; SaveSettings(); Log("Giriş bilgileri kaydedildi."); }
+            else Log("Giriş bilgisi girilmedi.");
+        }
+    }
 
     void ShowMain() { Show(); WindowState = FormWindowState.Normal; Activate(); }
 
@@ -645,9 +671,13 @@ class App : Form
     async Task TryStart()
     {
         btn.Enabled = false; watch.Stop();
-        SetState(Ph.Connect, "Ağ aranıyor", Ssid + " Wi-Fi listesinde aranıyor");
-        bool vis = false;
-        await Task.Run(() => { vis = NetworkVisible(); });
+        SetState(Ph.Connect, "Wi-Fi kontrol ediliyor", "Kapalıysa açılır, sonra " + Ssid + " aranır");
+        bool vis = false, changed = false;
+        await Task.Run(() => {
+            changed = EnsureWifiOn();
+            for (int i = 0; i < (changed ? 6 : 1) && !vis; i++) { vis = NetworkVisible(); if (!vis && changed) Thread.Sleep(2000); }
+        });
+        if (changed) Log("Wi-Fi kapalıydı, otomatik açıldı.");
         if (cancel && !running && ph == Ph.Stopped) { btn.Enabled = true; return; }
         if (vis) { btn.Enabled = true; StartRun(); } else EnterWait();
     }
@@ -845,6 +875,26 @@ class App : Form
         Directory.CreateDirectory(Path.GetDirectoryName(CredPath));
         File.WriteAllBytes(CredPath, ProtectedData.Protect(Encoding.UTF8.GetBytes(user + "\n" + pass), null, DataProtectionScope.CurrentUser));
     }
+    // 1 = Chrome'da kayıtlı, 2 = elle girilecek, 0 = vazgeçti
+    static int AskMode(IWin32Window owner)
+    {
+        int result = 0;
+        using (var f = new Form { Text = "GSBWIFI giriş bilgileri", ClientSize = new Size(470, 300), StartPosition = FormStartPosition.CenterScreen, FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, MinimizeBox = false, BackColor = T.Bg, ForeColor = T.Text })
+        {
+            var head = new Label { Text = "Giriş sayfasındaki bilgilerin nerede?", Location = new Point(20, 18), AutoSize = true, Font = new Font("Segoe UI Semibold", 12.5f), ForeColor = T.Text };
+            var b1 = new FlatBtn { Text = "Chrome'da bilgilerim kayıtlı", Location = new Point(20, 62), Size = new Size(430, 46), Fill = T.Accent, Fill2 = Color.FromArgb(34, 211, 238), BackColor = T.Bg };
+            var h1 = new Label { Text = "wifi.gsb.gov.tr'de kullanıcı adı ve şifre Chrome'dan kendiliğinden doluyor. Bir şey girmene gerek kalmaz.", Location = new Point(22, 112), Size = new Size(426, 38), ForeColor = T.Muted };
+            var b2 = new FlatBtn { Text = "Bilgilerimi gireyim", Location = new Point(20, 164), Size = new Size(430, 46), Ghost = true, BackColor = T.Bg };
+            var h2 = new Label { Text = "Bir kez sorulur. Bilgiler bu bilgisayarda, sadece senin Windows hesabınla açılabilecek şekilde şifreli saklanır.", Location = new Point(22, 214), Size = new Size(426, 38), ForeColor = T.Muted };
+            b1.Click += (s, e) => { result = 1; f.Close(); };
+            b2.Click += (s, e) => { result = 2; f.Close(); };
+            f.Controls.AddRange(new Control[] { head, b1, h1, b2, h2 });
+            if (T.S != 1f) f.Scale(new SizeF(T.S, T.S));
+            f.ShowDialog(owner);
+        }
+        return result;
+    }
+
     static bool AskCred(IWin32Window owner)
     {
         using (var f = new Form { Text = "GSBWIFI giriş bilgileri", ClientSize = new Size(360, 214), StartPosition = FormStartPosition.CenterScreen, FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, MinimizeBox = false, BackColor = T.Bg, ForeColor = T.Text })
@@ -864,12 +914,63 @@ class App : Form
         }
     }
 
+    // Chrome'da kayıtlı şifreler için: kullanıcının Chrome profilinden gerekli dosyalar geçici profile kopyalanır (silinir)
+    static void CopyShared(string a, string b)
+    {
+        try {
+            if (!File.Exists(a)) return;
+            using (var i = new FileStream(a, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete)) using (var o = File.Create(b)) i.CopyTo(o);
+        } catch { }
+    }
+    static void SeedChromeProfile(string dest)
+    {
+        string src = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Google\Chrome\User Data"), prof = "Default";
+        try {
+            var d = new JavaScriptSerializer().DeserializeObject(File.ReadAllText(Path.Combine(src, "Local State"))) as Dictionary<string, object>;
+            var pr = d != null && d.ContainsKey("profile") ? d["profile"] as Dictionary<string, object> : null;
+            if (pr != null && pr.ContainsKey("last_used")) prof = (string)pr["last_used"];
+        } catch { }
+        CopyShared(Path.Combine(src, "Local State"), Path.Combine(dest, "Local State"));
+        Directory.CreateDirectory(Path.Combine(dest, "Default"));
+        foreach (var f in new[] { "Login Data", "Login Data For Account", "Preferences", "Web Data" }) CopyShared(Path.Combine(src, prof, f), Path.Combine(dest, "Default", f));
+    }
+
+    // Wi-Fi radyosu ya da kartı kapalıysa açar. Kapalıydıysa true döner.
+    static bool EnsureWifiOn()
+    {
+        const string ps = @"
+$ErrorActionPreference='SilentlyContinue'
+$was=$false
+try {
+  Add-Type -AssemblyName System.Runtime.WindowsRuntime
+  $asTask=([System.WindowsRuntimeSystemExtensions].GetMethods() | ? { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' })[0]
+  function Await($op,$t){ $n=$asTask.MakeGenericMethod($t).Invoke($null,@($op)); $n.Wait(-1)|Out-Null; $n.Result }
+  [Windows.Devices.Radios.Radio,Windows.System.Devices,ContentType=WindowsRuntime]|Out-Null
+  [Windows.Devices.Radios.RadioAccessStatus,Windows.System.Devices,ContentType=WindowsRuntime]|Out-Null
+  Await ([Windows.Devices.Radios.Radio]::RequestAccessAsync()) ([Windows.Devices.Radios.RadioAccessStatus])|Out-Null
+  $radios=Await ([Windows.Devices.Radios.Radio]::GetRadiosAsync()) ([System.Collections.Generic.IReadOnlyList[Windows.Devices.Radios.Radio]])
+  foreach($r in $radios){ if($r.Kind -eq 'WiFi' -and $r.State -ne 'On'){ $was=$true; Await ($r.SetStateAsync('On')) ([Windows.Devices.Radios.RadioAccessStatus])|Out-Null } }
+} catch {}
+try { Get-NetAdapter -Physical | ? { $_.Status -eq 'Disabled' -and ($_.PhysicalMediaType -match '802.11' -or $_.InterfaceDescription -match 'Wi-?Fi|Wireless') } | % { $was=$true; Enable-NetAdapter -Name $_.Name -Confirm:$false } } catch {}
+if($was){'WAS_OFF'}
+";
+        try {
+            var psi = new ProcessStartInfo("powershell.exe", "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand " + Convert.ToBase64String(Encoding.Unicode.GetBytes(ps))) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true };
+            var p = Process.Start(psi);
+            string o = p.StandardOutput.ReadToEnd();
+            if (!p.WaitForExit(30000)) { try { p.Kill(); } catch { } }
+            return o.Contains("WAS_OFF");
+        } catch { return false; }
+    }
+
     // ---- Chrome ile giriş ----
     // Dönüş: ok | nopage | failed | nochrome | cancel
     string BrowserLogin(string user, string pass)
     {
         string exe = Cdp.FindBrowser();
         if (exe == null) return "nochrome";
+        bool chromeMode = user == null;
+        if (chromeMode && !exe.EndsWith("chrome.exe", StringComparison.OrdinalIgnoreCase)) return "nochrome";
         try
         {
             if (cdp == null || !cdp.Alive)
@@ -877,6 +978,7 @@ class App : Form
                 CloseBrowser();
                 SetState(Ph.Page, "Tarayıcı hazırlanıyor", "Chrome arka planda açılıyor");
                 var c = new Cdp(); c.Cancelled = () => cancel;
+                if (user == null) c.Seed = SeedChromeProfile;
                 Directory.CreateDirectory(DataDir);
                 if (!c.Start(exe, DataDir)) { c.Dispose(); return cancel ? "cancel" : "nochrome"; }
                 cdp = c; var o = ov; if (o != null) o.Cdp = c;
@@ -898,10 +1000,32 @@ class App : Form
             Log("Giriş sayfası açıldı.");
             SetState(Ph.Login, "Giriş yapılıyor", "Alanlar dolduruluyor, Giriş'e tıklanacak");
             Thread.Sleep(500);
-            if (!b.ClickSel("input[name=j_username],input[type=text],input[type=email]", "Kullanıcı adı alanı")) return "nopage";
-            b.TypeText(user, "Kullanıcı adı");
-            if (!b.ClickSel("input[name=j_password],input[type=password]", "Şifre alanı")) return "nopage";
-            b.TypeText(pass, "Şifre");
+            const string userSel = "input[name=j_username],input[type=text],input[type=email]", passSel = "input[name=j_password],input[type=password]";
+            if (chromeMode)
+            {
+                SetState(Ph.Login, "Chrome bilgileri dolduruyor", "Kayıtlı kullanıcı adı ve şifre bekleniyor");
+                const string filledJs = "(function(){var p=document.querySelector('input[type=password],input[name=j_password]');if(!p)return false;if(p.value&&p.value.length>0)return true;try{return p.matches(':-webkit-autofill')||p.matches(':autofill');}catch(e){return false;}})()";
+                bool filled = false;
+                for (int i = 0; i < 20 && !cancel; i++)
+                {
+                    object v = b.Eval(filledJs);
+                    if (v is bool && (bool)v) { filled = true; break; }
+                    if (i == 8) { try { b.ClickSel(userSel, "Kullanıcı adı alanı"); b.Key("ArrowDown", 40); b.Key("Enter", 13); } catch { } }
+                    Thread.Sleep(400);
+                }
+                if (cancel) return "cancel";
+                if (!filled) { Log("Chrome alanları doldurmadı."); return "noautofill"; }
+                Log("Chrome kayıtlı bilgileri getirdi.");
+                b.ClickSel(userSel, "Kullanıcı adı alanı");
+                b.ClickSel(passSel, "Şifre alanı");
+            }
+            else
+            {
+                if (!b.ClickSel(userSel, "Kullanıcı adı alanı")) return "nopage";
+                b.TypeText(user, "Kullanıcı adı");
+                if (!b.ClickSel(passSel, "Şifre alanı")) return "nopage";
+                b.TypeText(pass, "Şifre");
+            }
             if (cancel) return "cancel";
             if (!b.ClickSubmit()) return "nopage";
             Log("Giriş düğmesine tıklandı.");
@@ -983,18 +1107,23 @@ class App : Form
             if (!running) return;
             if (cur == Ssid) {
                 if (ok) { await Finish(); return; }
-                string u, p;
-                if (!LoadCred(out u, out p)) {
+                string u = null, p = null;
+                if (credMode != "chrome" && !LoadCred(out u, out p)) {
                     SetState(Ph.Warn, "Giriş bilgisi gerekli", "'Giriş bilgileri' düğmesinden kullanıcı adı ve şifreni gir.");
                     Log("Kayıtlı giriş bilgisi yok."); return;
                 }
                 attempts++;
                 SetState(Ph.Page, "İnternet yok, giriş sayfasına bakılıyor", Ssid + " bağlı ama internet gelmedi");
                 string res = null;
-                await Task.Run(() => { res = BrowserLogin(u, p); if (res == "nochrome") { Log("Chrome bulunamadı, doğrudan giriş deneniyor."); res = HttpLogin(u, p); } });
+                await Task.Run(() => { res = BrowserLogin(u, p); if (res == "nochrome" && u != null) { Log("Chrome bulunamadı, doğrudan giriş deneniyor."); res = HttpLogin(u, p); } });
                 if (!running) return;
                 if (res == "ok") { await Finish(); return; }
                 if (res == "cancel") return;
+                if (res == "noautofill" || (res == "nochrome" && credMode == "chrome")) {
+                    StopRun();
+                    SetState(Ph.Warn, "Bilgiler otomatik dolmadı", "Chrome kayıtlı bilgileri getirmedi. 'Giriş bilgileri'nden bilgilerini elle gir.");
+                    Log("Chrome'da kayıtlı bilgiler bulunamadı, bilgileri elle girmen gerek."); return;
+                }
                 if (res == "failed") { loginFails++; Log("Giriş gönderildi ama internet gelmedi." + (loginFails >= 3 ? " Bilgiler yanlış olabilir, kontrol et." : "")); }
                 else Log("Giriş sayfası açılmadı.");
                 resets++;
@@ -1006,6 +1135,7 @@ class App : Form
                 await Task.Run(() => { vis = NetworkVisible(); });
                 if (!running) return;
                 if (!vis) {
+                    if (missCount++ % 3 == 0) { bool ch = false; await Task.Run(() => { ch = EnsureWifiOn(); }); if (ch) Log("Wi-Fi kapalıydı, otomatik açıldı."); }
                     SetState(Ph.Warn, Ssid + " ağı bulunamadı", "Wi-Fi listesinde görünmüyor, aranmaya devam ediliyor...");
                     Log(Ssid + " listede yok, bekleniyor.");
                 } else {
