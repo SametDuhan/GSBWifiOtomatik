@@ -34,7 +34,7 @@ Chrome bulunamazsa Edge, o da yoksa doğrudan form gönderimi denenir.
 
 - **Solda:** Başlat / Durdur, **Görüntü** anahtarı, giriş bilgileri, arka plana alma.
 - **Ortada:** o an ne olduğu (büyük durum, dört adımlı ilerleme çizgisi, deneme / Wi-Fi yenileme / süre sayaçları) ve altında kayıt.
-- **Görüntü açıkken:** Programın yaptığı her şeyi **gerçek ekranında, farenin yanında gezen ikinci bir pembe imleçle** izlersin. Senin farene dokunulmaz. İmleç tıkladığı anda halka çıkar, yanında ne yaptığını yazan bir etiket durur.
+- **Görüntü açıkken:** Programın yaptığı her şeyi **gerçek ekranında, farenin yanında gezen ikinci bir mavi imleçle** izlersin. Senin farene dokunulmaz. İmleç tıkladığı anda halka çıkar, yanında ne yaptığını yazan bir etiket durur.
   - Giriş sayfası görünür bir Chrome penceresinde açılır. İkinci imleç kullanıcı adı alanına, şifre alanına ve **Giriş** düğmesine gidip tıklar (alanlardaki yazı noktayla maskelenir).
   - Wi-Fi kapalıysa ya da kapatıp açmak gerekiyorsa imleç görev çubuğundaki Wi-Fi simgesine gidip tıklar, hızlı ayarlar paneli açılır ve Wi-Fi düğmesi kapanıp açılır.
   - Windows'un kendi hızlı ayarlar paneli her pencerenin üstüne çizildiği için ikinci imleç panelin içinde görünemez. İmleç panelin hemen sol kenarında, Wi-Fi düğmesinin hizasında durur.

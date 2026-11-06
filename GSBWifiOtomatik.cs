@@ -29,9 +29,9 @@ enum Ph { Idle, Stopped, Connect, Reset, Page, Login, Done, Warn }
 static class T
 {
     public static readonly Color Bg = Color.FromArgb(13, 17, 27), Side = Color.FromArgb(19, 25, 39), Card = Color.FromArgb(23, 30, 47),
-        Line = Color.FromArgb(40, 50, 74), Text = Color.FromArgb(233, 237, 246), Muted = Color.FromArgb(135, 147, 170),
+        Line = Color.FromArgb(40, 50, 74), Text = Color.FromArgb(233, 237, 246), Muted = Color.FromArgb(176, 187, 208),
         Accent = Color.FromArgb(59, 130, 246), Green = Color.FromArgb(34, 197, 94), Amber = Color.FromArgb(245, 158, 11),
-        Red = Color.FromArgb(239, 68, 68), Cursor = Color.FromArgb(255, 94, 196);
+        Red = Color.FromArgb(239, 68, 68), Cursor = Color.FromArgb(56, 150, 255);
     public static float S = 1f;
     public static void Tx(Graphics g, string s, float pt, bool semi, Color c, float x, float y, float w, float h, int align, bool vcenter, bool wrap)
     {
@@ -388,7 +388,7 @@ class Switch : Control
         using (var p = T.Round(new RectangleF(0.5f, 0.5f, w - 1.5f, h - 1.5f), 11)) using (var b = new SolidBrush(hover ? T.Lighten(T.Card, 8) : T.Card)) using (var pen = new Pen(on ? T.A(T.Accent, 170) : T.Line, 1.2f))
         { g.FillPath(b, p); g.DrawPath(pen, p); }
         T.Tx(g, Text, 10.5f, true, T.Text, 12, 8, w - 70, 20, 0, false, false);
-        T.Tx(g, Sub, 8.25f, false, T.Muted, 12, 28, w - 70, 16, 0, false, false);
+        T.Tx(g, Sub, 8.75f, false, Color.FromArgb(190, 200, 220), 12, 28, w - 70, 16, 0, false, false);
         var pill = new RectangleF(w - 52, (h - 22) / 2f, 40, 22);
         using (var p = T.Round(pill, 11))
         {
@@ -504,27 +504,27 @@ class Ghost : Form
         // iz
         for (int i = trail.Length - 1; i >= 1; i--)
         {
-            float px = TX + (trail[i].X - X) / S, py = TY + (trail[i].Y - Y) / S, r = 2 + (trail.Length - i) * 0.5f;
+            float px = TX + (trail[i].X - X) / S, py = TY + (trail[i].Y - Y) / S, r = 1.5f + (trail.Length - i) * 0.35f;
             using (var b = new SolidBrush(T.A(T.Cursor, al(14 + (trail.Length - i) * 4)))) g.FillEllipse(b, px - r, py - r, r * 2, r * 2);
         }
         // tıklama dalgası
         long dt = unchecked(Environment.TickCount - ClickTicks);
         if (ClickTicks != 0 && dt >= 0 && dt < 800)
         {
-            float t = dt / 800f, r = 8 + 42 * t;
-            using (var pen = new Pen(T.A(T.Cursor, al((int)(240 * (1 - t)))), 3.5f)) g.DrawEllipse(pen, TX - r, TY - r, r * 2, r * 2);
+            float t = dt / 800f, r = 5 + 28 * t;
+            using (var pen = new Pen(T.A(T.Cursor, al((int)(240 * (1 - t)))), 2.5f)) g.DrawEllipse(pen, TX - r, TY - r, r * 2, r * 2);
             using (var b = new SolidBrush(T.A(T.Cursor, al((int)(90 * (1 - t)))))) g.FillEllipse(b, TX - r, TY - r, r * 2, r * 2);
-            float r2 = 6 + 22 * t;
+            float r2 = 3 + 14 * t;
             using (var pen = new Pen(T.A(Color.White, al((int)(200 * (1 - t)))), 2f)) g.DrawEllipse(pen, TX - r2, TY - r2, r2 * 2, r2 * 2);
         }
         // parıltı
         float pulse = 0.5f + 0.5f * (float)Math.Sin(anim * Math.PI * 2);
-        using (var b = new SolidBrush(T.A(T.Cursor, al((int)(34 + 26 * pulse))))) g.FillEllipse(b, TX - 18, TY - 18, 36, 36);
+        using (var b = new SolidBrush(T.A(T.Cursor, al((int)(34 + 26 * pulse))))) g.FillEllipse(b, TX - 12, TY - 12, 24, 24);
         // imleç
         var pts = new[] { new PointF(0, 0), new PointF(0, 19), new PointF(5, 14.5f), new PointF(8.5f, 22), new PointF(12, 20.5f), new PointF(8.5f, 13.5f), new PointF(15, 13.5f) };
-        float k = 1.3f;
+        float k = 0.95f;
         var sh = new PointF[pts.Length]; var cu = new PointF[pts.Length];
-        for (int i = 0; i < pts.Length; i++) { cu[i] = new PointF(TX + pts[i].X * k, TY + pts[i].Y * k); sh[i] = new PointF(cu[i].X + 2, cu[i].Y + 2.5f); }
+        for (int i = 0; i < pts.Length; i++) { cu[i] = new PointF(TX + pts[i].X * k, TY + pts[i].Y * k); sh[i] = new PointF(cu[i].X + 1.5f, cu[i].Y + 2f); }
         using (var b = new SolidBrush(Color.FromArgb(al(110), 0, 0, 0))) g.FillPolygon(b, sh);
         using (var b = new SolidBrush(T.A(T.Cursor, al(255)))) g.FillPolygon(b, cu);
         using (var pen = new Pen(T.A(Color.White, al(255)), 1.8f) { LineJoin = LineJoin.Round }) g.DrawPolygon(pen, cu);
@@ -536,7 +536,7 @@ class Ghost : Form
             var scr = Screen.FromPoint(new Point((int)X, (int)Y)).Bounds;
             bool flip = ChipLeft || X + (30 + cw) * S > scr.Right - 10;
             bool up = Y + (70 + 40) * S > scr.Bottom;
-            float cx = flip ? TX - 16 - cw : TX + 30, cy = up ? TY - 62 : TY + 34;
+            float cx = flip ? TX - 14 - cw : TX + 22, cy = up ? TY - 52 : TY + 26;
             var chip = new RectangleF(cx, cy, cw, 26);
             using (var p = T.Round(chip, 13)) using (var b = new SolidBrush(Color.FromArgb(al(238), 13, 17, 27))) using (var pen = new Pen(T.A(T.Cursor, al(200)), 1.4f)) { g.FillPath(b, p); g.DrawPath(pen, p); }
             using (var b = new SolidBrush(T.A(T.Cursor, al(255)))) g.FillEllipse(b, chip.X + 11, chip.Y + 10, 6, 6);
@@ -703,7 +703,7 @@ class App : Form
         var brandS = new Label { Left = 74, Top = 48, AutoSize = true, Text = "Otomatik bağlantı", Font = new Font("Segoe UI", 8.5f), ForeColor = T.Muted, BackColor = T.Side };
         btn = new FlatBtn { Left = 20, Top = 100, Width = 180, Height = 50, Text = "Başlat", Fill = T.Green, Fill2 = Color.FromArgb(14, 165, 160), BackColor = T.Side, Font = new Font("Segoe UI Semibold", 12f) };
         var secHead = new Label { Left = 22, Top = 176, AutoSize = true, Text = "SEÇENEKLER", Font = new Font("Segoe UI Semibold", 8f), ForeColor = T.Muted, BackColor = T.Side };
-        swView = new Switch { Left = 20, Top = 198, Width = 180, Height = 54, Text = "Görüntü", Sub = "İkinci imleç ekranda gezsin", BackColor = T.Side };
+        swView = new Switch { Left = 20, Top = 198, Width = 180, Height = 54, Text = "Görüntü", Sub = "İkinci imleci göster", BackColor = T.Side };
         btnCred = new FlatBtn { Left = 20, Top = 440, Width = 180, Height = 40, Text = "Giriş bilgileri", Ghost = true, BackColor = T.Side };
         btnHide = new FlatBtn { Left = 20, Top = 492, Width = 180, Height = 40, Text = "Arka plana al", Ghost = true, BackColor = T.Side };
         side.Controls.AddRange(new Control[] { brand, brandT, brandS, btn, secHead, swView, btnCred, btnHide });
@@ -916,7 +916,7 @@ class App : Form
             using (var b = new SolidBrush(tone)) { g.FillRectangle(b, cx - 10, cy - 11, 7, 22); g.FillRectangle(b, cx + 3, cy - 11, 7, 22); }
 
         T.Tx(g, title, 18f, true, T.Text, 128, 44, sz.Width - 148, 34, 0, false, false);
-        T.Tx(g, detail, 10.5f, false, T.Muted, 128, 82, sz.Width - 148, 46, 0, false, true);
+        T.Tx(g, detail, 11f, false, Color.FromArgb(205, 214, 230), 128, 82, sz.Width - 148, 46, 0, false, true);
 
         // adımlar
         string[] names = { "Wi-Fi", "Giriş sayfası", "Giriş", "İnternet" };
@@ -943,7 +943,7 @@ class App : Form
             using (var pen = new Pen(nc, 2.5f)) g.DrawEllipse(pen, x - 12, y - 12, 24, 24);
             if (complete) using (var pen = new Pen(Color.White, 2.5f) { StartCap = LineCap.Round, EndCap = LineCap.Round }) g.DrawLines(pen, new[] { new PointF(x - 5, y), new PointF(x - 1.5f, y + 4), new PointF(x + 5, y - 4) });
             else if (current) using (var b = new SolidBrush(nc)) { float k = 4 + 2 * (float)Math.Sin(ang); g.FillEllipse(b, x - k, y - k, k * 2, k * 2); }
-            T.Tx(g, names[i], 9f, complete || current, (complete || current) ? T.Text : T.Muted, x - 60, y + 17, 120, 20, 1, false, false);
+            T.Tx(g, names[i], 10f, true, (complete || current) ? T.Text : Color.FromArgb(190, 200, 220), x - 60, y + 17, 120, 20, 1, false, false);
         }
 
         // sayaçlar
@@ -953,8 +953,8 @@ class App : Form
         for (int i = 0; i < 3; i++)
         {
             float x = 24 + cw * i;
-            T.Tx(g, lab[i], 7.5f, true, T.Muted, x, 204, cw, 14, 0, false, false);
-            T.Tx(g, val[i], 14f, true, T.Text, x, 218, cw, 26, 0, false, false);
+            T.Tx(g, lab[i], 8.5f, true, Color.FromArgb(190, 200, 220), x, 207, cw, 16, 0, false, false);
+            T.Tx(g, val[i], 14f, true, T.Text, x, 222, cw, 26, 0, false, false);
         }
     }
 
