@@ -23,6 +23,7 @@ GSBWIFI'ye bağlanırken Windows sık sık şunu gösteriyor:
 1. Uygulamayı açarsın. Hemen çalışmaya başlar.
 2. 4 saniyede bir **gerçek internet var mı** diye bakar. Bunun için Microsoft'un bağlantı test adresini (`msftconnecttest.com`) kullanır. Windows'un "İnternet yok" kararını verirken baktığı kaynakla aynıdır.
 3. GSBWIFI'ye bağlı değilsen bağlanmayı dener.
+   Bağlıysan ve internet yoksa önce **giriş sayfasını** (`wifi.gsb.gov.tr`) kontrol eder. Sayfa açılıyorsa kayıtlı bilgilerinle girişi senin yerine yapar.
 4. Bağlısın ama internet yoksa yaklaşık 12 saniye bekler. Hâlâ yoksa bağlantıyı kesip yeniden bağlanır. Bunun yerine her denemede **Wi-Fi kartını kapatıp açar** (senin Wi-Fi anahtarını kapatıp açmana denk gelir). İnternet gelene kadar bunu tekrarlar.
 5. **İnternet gelince** bildirim gösterir ve kendini kapatır.
 
@@ -32,6 +33,7 @@ Pencerede anlık durum ve işlem kaydı görünür. **Arka plana al** ile görev
 
 1. [Releases](../../releases/latest) sayfasından `GSBWifiOtomatik.exe` dosyasını indir.
 2. Çift tıkla. Kurulum gerekmez.
+   İlk açılışta kullanıcı adını ve şifreni **bir kez** girersin (aşağıda nasıl saklandığı yazıyor).
 3. Bağlanınca kendi kapanır.
 
 > Windows, imzasız bir uygulama olduğu için ilk açılışta "tanınmayan uygulama" uyarısı gösterebilir. **Daha fazla bilgi → Yine de çalıştır** ile geçebilirsin. Kaynak kodu bu depoda, derlemeyi kendin de yapabilirsin.
@@ -42,6 +44,12 @@ Pencerede anlık durum ve işlem kaydı görünür. **Arka plana al** ile görev
 - Bilgisayarda GSBWIFI profilinin kayıtlı olması (ağa en az bir kez bağlanmış olmalısın)
 - **Yönetici izni**: Wi-Fi kartını kapatıp açmak için gerekir. Uygulama her açılışta Windows'un izin penceresini gösterir.
 - Ek bir şey yok. Uygulama Windows ile gelen .NET Framework 4 üzerinde çalışır.
+
+## Giriş bilgileri nerede duruyor?
+
+- İlk açılışta bir kez sorulur, sonra sorulmaz. **Giriş bilgilerini değiştir** düğmesiyle güncellenir.
+- Bilgiler `%APPDATA%\GSBWifiOtomatik\kimlik.dat` dosyasında, Windows'un kullanıcıya özel şifrelemesiyle (DPAPI) saklanır. Dosya yalnızca senin Windows hesabınla açılabilir.
+- Kodda ve depoda hiçbir bilgi **yoktur**. Bilgiler sadece `wifi.gsb.gov.tr` giriş sayfasına gönderilir.
 
 ## Kendin derlemek
 
@@ -68,7 +76,7 @@ Başka bir açık ağda da aynı sorunu yaşıyorsan `Ssid` değerini değiştir
 
 ## Sınırlar
 
-- Ağ bir **giriş sayfası** (captive portal) istiyorsa uygulama onu doldurmaz. İnternet gelmediği için denemeye devam eder.
+- Giriş sayfası değişirse (alan adları, adres) uygulamanın güncellenmesi gerekir. Sayfanın düz bir form olduğu varsayılır, captcha ya da SMS kodu varsa giremez.
 - Sadece Wi-Fi bağlantısını yönetir. Ağın tarafındaki bir kesintiyi düzeltemez. Ağ kapalıysa döngü sürer, ağ gelince bağlanır.
 - Komutlar Windows'un kendi `netsh wlan` aracı üzerinden çalışır.
 
