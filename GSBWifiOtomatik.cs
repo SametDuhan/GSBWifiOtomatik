@@ -11,7 +11,7 @@ using System.Windows.Forms;
 class App : Form
 {
     const string Ssid = "GSBWIFI";
-    const int TickMs = 4000, FailsToKick = 3;
+    const int TickMs = 4000, FailsToKick = 3, ResetEvery = 3;
     Label lbl; TextBox box; Button btn, btnHide; NotifyIcon tray; System.Windows.Forms.Timer timer;
     int fails = 0, kicks = 0; bool running = true, busy = false, done = false;
 
@@ -68,6 +68,23 @@ class App : Form
                 return sr.ReadToEnd().Trim() == "Microsoft Connect Test";
         } catch { return false; }
     }
+    static string AdapterName()
+    {
+        foreach (var l in Netsh("wlan show interfaces").Split('\n')) {
+            var m = Regex.Match(l, @"^\s+(\S[^:]*?)\s*:\s*(\S.*?)\s*$");
+            if (m.Success) return m.Groups[2].Value;
+        }
+        return "Wi-Fi";
+    }
+    static void ResetAdapter()
+    {
+        string n = AdapterName();
+        Netsh("interface set interface name=\"" + n + "\" admin=disabled");
+        Thread.Sleep(3000);
+        Netsh("interface set interface name=\"" + n + "\" admin=enabled");
+        Thread.Sleep(5000);
+        Connect();
+    }
     static void Connect() { Netsh("wlan connect name=\"" + Ssid + "\" ssid=\"" + Ssid + "\""); }
 
     async Task Tick()
@@ -85,8 +102,14 @@ class App : Form
                 }
                 fails++; SetStatus(Ssid + ": internet yok (" + fails + "/" + FailsToKick + ")");
                 if (fails >= FailsToKick) {
-                    fails = 0; kicks++; Log("Kopar/bağlan #" + kicks);
-                    await Task.Run(() => { Netsh("wlan disconnect"); Thread.Sleep(1500); Connect(); });
+                    fails = 0; kicks++;
+                    if (kicks % ResetEvery == 0) {
+                        Log("Wi-Fi kapat/aç #" + kicks);
+                        await Task.Run(() => ResetAdapter());
+                    } else {
+                        Log("Kopar/bağlan #" + kicks);
+                        await Task.Run(() => { Netsh("wlan disconnect"); Thread.Sleep(1500); Connect(); });
+                    }
                 }
             } else {
                 fails = 0; SetStatus(Ssid + " bağlı değil, bağlanılıyor...");

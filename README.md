@@ -23,7 +23,7 @@ GSBWIFI'ye bağlanırken Windows sık sık şunu gösteriyor:
 1. Uygulamayı açarsın. Hemen çalışmaya başlar.
 2. 4 saniyede bir **gerçek internet var mı** diye bakar. Bunun için Microsoft'un bağlantı test adresini (`msftconnecttest.com`) kullanır. Windows'un "İnternet yok" kararını verirken baktığı kaynakla aynıdır.
 3. GSBWIFI'ye bağlı değilsen bağlanmayı dener.
-4. Bağlısın ama internet yoksa yaklaşık 12 saniye bekler. Hâlâ yoksa bağlantıyı kesip yeniden bağlanır. İnternet gelene kadar bunu tekrarlar.
+4. Bağlısın ama internet yoksa yaklaşık 12 saniye bekler. Hâlâ yoksa bağlantıyı kesip yeniden bağlanır. Üç denemede bir bunun yerine **Wi-Fi kartını kapatıp açar** (senin Wi-Fi anahtarını kapatıp açmana denk gelir). İnternet gelene kadar bunu tekrarlar.
 5. **İnternet gelince** bildirim gösterir ve kendini kapatır.
 
 Pencerede anlık durum ve işlem kaydı görünür. **Arka plana al** ile görev çubuğu simgesine iner, simgeye çift tıklayınca geri gelir. **Durdur** ile döngüyü elle durdurabilirsin.
@@ -40,6 +40,7 @@ Pencerede anlık durum ve işlem kaydı görünür. **Arka plana al** ile görev
 
 - Windows 10 / 11
 - Bilgisayarda GSBWIFI profilinin kayıtlı olması (ağa en az bir kez bağlanmış olmalısın)
+- **Yönetici izni**: Wi-Fi kartını kapatıp açmak için gerekir. Uygulama her açılışta Windows'un izin penceresini gösterir.
 - Ek bir şey yok. Uygulama Windows ile gelen .NET Framework 4 üzerinde çalışır.
 
 ## Kendin derlemek
@@ -61,6 +62,7 @@ build.bat
 | `Ssid` | `GSBWIFI` | Bağlanılacak ağın adı |
 | `TickMs` | `4000` | Kontrol aralığı (milisaniye) |
 | `FailsToKick` | `3` | Kaç başarısız kontrolden sonra kopar/bağlan yapılacağı |
+| `ResetEvery` | `3` | Kaç kopar/bağlan denemesinde bir Wi-Fi kartının kapatıp açılacağı |
 
 Başka bir açık ağda da aynı sorunu yaşıyorsan `Ssid` değerini değiştirip yeniden derlemen yeterli.
 
@@ -75,6 +77,7 @@ Başka bir açık ağda da aynı sorunu yaşıyorsan `Ssid` değerini değiştir
 ```
 GSBWifiOtomatik.cs   Uygulamanın tamamı (C#, Windows Forms)
 build.bat            Derleme betiği
+app.manifest         Yönetici izni isteği
 assets/
   logo.png           Logo
   app.ico            Uygulama simgesi (16–256 px)
