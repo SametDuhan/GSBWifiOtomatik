@@ -327,6 +327,15 @@ class Cdp : IDisposable
 class FlatBtn : Control
 {
     public Color Fill = T.Card, Fill2 = Color.Empty; public bool Ghost = false; bool hover, down;
+    // Düğmenin en sağında ayrı tıklanan ayar (dişli) bölgesi
+    public bool Gear = false, GearEnabled = true; public event EventHandler GearClick; bool hoverGear, downGear;
+    bool InGear(int x) { return Gear && x >= Width - (int)(54 * T.S); }
+    protected override void OnMouseMove(MouseEventArgs e) { bool g = InGear(e.X); if (g != hoverGear) { hoverGear = g; Invalidate(); } base.OnMouseMove(e); }
+    protected override void OnClick(EventArgs e)
+    {
+        if (Gear && downGear) { if (GearEnabled && GearClick != null) GearClick(this, EventArgs.Empty); return; }
+        base.OnClick(e);
+    }
     public FlatBtn()
     {
         SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw | ControlStyles.Selectable, true);
@@ -334,8 +343,8 @@ class FlatBtn : Control
     }
     protected override void OnEnabledChanged(EventArgs e) { Cursor = Enabled ? Cursors.Hand : Cursors.No; hover = false; Invalidate(); base.OnEnabledChanged(e); }
     protected override void OnMouseEnter(EventArgs e) { hover = true; Invalidate(); base.OnMouseEnter(e); }
-    protected override void OnMouseLeave(EventArgs e) { hover = false; down = false; Invalidate(); base.OnMouseLeave(e); }
-    protected override void OnMouseDown(MouseEventArgs e) { down = true; Invalidate(); base.OnMouseDown(e); }
+    protected override void OnMouseLeave(EventArgs e) { hover = false; down = false; hoverGear = false; Invalidate(); base.OnMouseLeave(e); }
+    protected override void OnMouseDown(MouseEventArgs e) { down = true; downGear = InGear(e.X); Invalidate(); base.OnMouseDown(e); }
     protected override void OnMouseUp(MouseEventArgs e) { down = false; Invalidate(); base.OnMouseUp(e); }
     protected override void OnPaint(PaintEventArgs e)
     {
@@ -362,6 +371,16 @@ class FlatBtn : Control
                 using (var lg = new LinearGradientBrush(r, c1, c2, 20f)) g.FillPath(lg, p);
                 using (var pen = new Pen(T.A(Color.White, hover ? 70 : 35), 1f)) g.DrawPath(pen, p);
             }
+        }
+        if (Gear)
+        {
+            float gx = w - 27, gy = h / 2f; Color gc = GearEnabled ? (hoverGear ? Color.White : Color.FromArgb(205, 214, 232)) : Color.FromArgb(95, 105, 128);
+            if (hoverGear && GearEnabled) using (var b = new SolidBrush(T.A(T.Accent, 60))) g.FillEllipse(b, gx - 15, gy - 15, 30, 30);
+            using (var pen = new Pen(T.A(Color.White, 28), 1f)) g.DrawLine(pen, w - 54, 10, w - 54, h - 10);
+            using (var pen = new Pen(gc, 2.6f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+                for (int i = 0; i < 8; i++) { double a = i * Math.PI / 4; g.DrawLine(pen, (float)(gx + Math.Cos(a) * 6.5), (float)(gy + Math.Sin(a) * 6.5), (float)(gx + Math.Cos(a) * 9), (float)(gy + Math.Sin(a) * 9)); }
+            using (var pen = new Pen(gc, 2.4f)) { g.DrawEllipse(pen, gx - 6.5f, gy - 6.5f, 13, 13); g.DrawEllipse(pen, gx - 2.4f, gy - 2.4f, 4.8f, 4.8f); }
+            w -= 54;
         }
         T.Tx(g, Text, Font.SizeInPoints, true, !Ghost && !Enabled ? Color.FromArgb(150, 158, 178) : Ghost ? T.Text : Color.White, 0, 0, w, h, 1, true, false);
     }
@@ -1064,13 +1083,12 @@ class App : Form
             var head = new Label { Text = "Giriş sayfasındaki bilgilerin nerede?", Location = new Point(20, 18), AutoSize = true, Font = new Font("Segoe UI Semibold", 12.5f), ForeColor = T.Text };
             var b1 = new FlatBtn { Text = "Chrome'da bilgilerim kayıtlı", Location = new Point(20, 62), Size = new Size(430, 46), Fill = T.Accent, Fill2 = Color.FromArgb(34, 211, 238), BackColor = T.Bg };
             var h1 = new Label { Text = "wifi.gsb.gov.tr'de kullanıcı adı ve şifre Chrome'dan kendiliğinden doluyor. Bir şey girmene gerek kalmaz.", Location = new Point(22, 112), Size = new Size(426, 38), ForeColor = T.Muted };
-            var b2 = new FlatBtn { Text = "Bilgilerimi gireyim", Location = new Point(20, 164), Size = new Size(322, 46), Ghost = true, BackColor = T.Bg };
-            var b3 = new FlatBtn { Text = "Değiştir", Location = new Point(352, 164), Size = new Size(98, 46), Ghost = true, BackColor = T.Bg, Enabled = has };
-            var h2 = new Label { Text = has ? "Kayıtlı bilgilerin var, tekrar sorulmaz. Güncellemek için sağdaki Değiştir düğmesini kullan." : "Bir kez sorulur ve kaydedilir. Bilgiler bu bilgisayarda, sadece senin Windows hesabınla açılabilecek şekilde şifreli saklanır.", Location = new Point(22, 214), Size = new Size(426, 38), ForeColor = T.Muted };
+            var b2 = new FlatBtn { Text = "Bilgilerimi gireyim", Location = new Point(20, 164), Size = new Size(430, 46), Ghost = true, BackColor = T.Bg, Gear = true, GearEnabled = has };
+            var h2 = new Label { Text = has ? "Kayıtlı bilgilerin var, tekrar sorulmaz. Güncellemek için sağdaki ayar simgesine tıkla." : "Bir kez sorulur ve kaydedilir. Bilgiler bu bilgisayarda, sadece senin Windows hesabınla açılabilecek şekilde şifreli saklanır.", Location = new Point(22, 214), Size = new Size(426, 38), ForeColor = T.Muted };
             b1.Click += (s, e) => { result = 1; f.Close(); };
             b2.Click += (s, e) => { result = 2; f.Close(); };
-            b3.Click += (s, e) => { result = 3; f.Close(); };
-            f.Controls.AddRange(new Control[] { head, b1, h1, b2, b3, h2 });
+            b2.GearClick += (s, e) => { result = 3; f.Close(); };
+            f.Controls.AddRange(new Control[] { head, b1, h1, b2, h2 });
             if (T.S != 1f) f.Scale(new SizeF(T.S, T.S));
             f.ShowDialog(owner);
         }

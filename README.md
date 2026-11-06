@@ -64,7 +64,7 @@ Chrome bulunamazsa Edge, o da yoksa doğrudan form gönderimi denenir.
 İlk açılışta iki seçenek sorulur (**Giriş bilgileri** düğmesinden sonradan değiştirilir):
 
 - **Chrome'da bilgilerim kayıtlı:** Giriş sayfasında kullanıcı adı ve şifre Chrome'dan kendiliğinden doluyorsa bunu seç. Uygulama, Chrome profilinden kayıtlı şifre dosyalarını geçici bir klasöre kopyalar, sayfa dolunca Giriş'e basar ve klasörü siler. Chrome doldurmazsa bilgileri elle girmeni ister.
-- **Bilgilerimi gireyim:** Kullanıcı adı ve şifre bir kez sorulur ve kaydedilir, bir daha sorulmaz. Sağdaki **Değiştir** düğmesiyle istediğin zaman güncellenir.
+- **Bilgilerimi gireyim:** Kullanıcı adı ve şifre bir kez sorulur ve kaydedilir, bir daha sorulmaz. Düğmenin sağ ucundaki **ayar simgesiyle** istediğin zaman güncellenir.
 
 ## Elle girilen bilgiler nerede duruyor?
 
