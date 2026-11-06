@@ -297,6 +297,7 @@ class FlatBtn : Control
         SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw | ControlStyles.Selectable, true);
         Cursor = Cursors.Hand; Font = new Font("Segoe UI Semibold", 10.5f);
     }
+    protected override void OnEnabledChanged(EventArgs e) { Cursor = Enabled ? Cursors.Hand : Cursors.No; hover = false; Invalidate(); base.OnEnabledChanged(e); }
     protected override void OnMouseEnter(EventArgs e) { hover = true; Invalidate(); base.OnMouseEnter(e); }
     protected override void OnMouseLeave(EventArgs e) { hover = false; down = false; Invalidate(); base.OnMouseLeave(e); }
     protected override void OnMouseDown(MouseEventArgs e) { down = true; Invalidate(); base.OnMouseDown(e); }
@@ -315,6 +316,11 @@ class FlatBtn : Control
                 using (var b = new SolidBrush(hover ? T.Lighten(T.Card, 10) : T.Card)) g.FillPath(b, p);
                 using (var pen = new Pen(hover ? T.Accent : T.Line, 1.2f)) g.DrawPath(pen, p);
             }
+            else if (!Enabled)
+            {
+                using (var lg = new LinearGradientBrush(r, Color.FromArgb(70, 78, 98), Color.FromArgb(56, 63, 82), 20f)) g.FillPath(lg, p);
+                using (var pen = new Pen(T.A(Color.White, 18), 1f)) g.DrawPath(pen, p);
+            }
             else
             {
                 Color c1 = T.Lighten(Fill, lift), c2 = T.Lighten(Fill2.IsEmpty ? T.Lighten(Fill, -30) : Fill2, lift);
@@ -322,7 +328,7 @@ class FlatBtn : Control
                 using (var pen = new Pen(T.A(Color.White, hover ? 70 : 35), 1f)) g.DrawPath(pen, p);
             }
         }
-        T.Tx(g, Text, Font.SizeInPoints, true, Ghost ? T.Text : Color.White, 0, 0, w, h, 1, true, false);
+        T.Tx(g, Text, Font.SizeInPoints, true, !Ghost && !Enabled ? Color.FromArgb(150, 158, 178) : Ghost ? T.Text : Color.White, 0, 0, w, h, 1, true, false);
     }
 }
 
@@ -506,7 +512,7 @@ class App : Form
     const string PortalPost = "https://wifi.gsb.gov.tr/j_spring_security_check";
 
     RichTextBox box; FlatBtn btn, btnHide, btnCred; Switch swView; Card card; Label logHead;
-    NotifyIcon tray; System.Windows.Forms.Timer timer, animTimer;
+    NotifyIcon tray; System.Windows.Forms.Timer timer, animTimer, watch;
     int attempts = 0, resets = 0, loginFails = 0; float anim = 0;
     bool running = false, busy = false, done = false, viewOn = false;
     volatile bool cancel = false;
@@ -562,15 +568,17 @@ class App : Form
 
         timer = new System.Windows.Forms.Timer { Interval = TickMs };
         timer.Tick += async (s, e) => await Tick();
+        watch = new System.Windows.Forms.Timer { Interval = 4000 };
+        watch.Tick += async (s, e) => await WatchTick();
         animTimer = new System.Windows.Forms.Timer { Interval = 16 };
         animTimer.Tick += (s, e) => { anim += 0.011f; if (anim > 1) anim -= 1; if (Visible && WindowState != FormWindowState.Minimized) card.Invalidate(); };
         animTimer.Start();
 
-        btn.Click += (s, e) => { if (running) StopRun(); else StartRun(); };
+        btn.Click += (s, e) => { if (running) StopRun(); else { var _t = TryStart(); } };
         btnHide.Click += (s, e) => Hide();
         btnCred.Click += (s, e) => { if (AskCred(this)) Log("Giriş bilgileri kaydedildi."); };
         swView.Changed += (s, e) => { viewOn = swView.Checked; SaveSettings(); RefreshOverlay(); };
-        FormClosing += (s, e) => { cancel = true; running = false; };
+        FormClosing += (s, e) => { cancel = true; running = false; watch.Stop(); };
         FormClosed += (s, e) => { tray.Visible = false; tray.Dispose(); if (ov != null) ov.Close(); CloseBrowser(); };
 
         if (T.S != 1f) Scale(new SizeF(T.S, T.S));
@@ -586,7 +594,7 @@ class App : Form
                 MessageBox.Show(this, "Giriş sayfasında senin yerine 'Giriş'e basabilmem için kullanıcı adı ve şifreni bir kez girmen gerekiyor.", "GSBWIFI Otomatik", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 if (AskCred(this)) Log("Giriş bilgileri kaydedildi."); else Log("Giriş bilgisi girilmedi, giriş sayfası otomatik geçilemez.");
             }
-            StartRun();
+            var _t = TryStart();
 #endif
         };
     }
@@ -632,6 +640,36 @@ class App : Form
             if (!ov.Visible) ov.Show();
         }
         else if (ov != null && ov.Visible) ov.Hide();
+    }
+
+    async Task TryStart()
+    {
+        btn.Enabled = false; watch.Stop();
+        SetState(Ph.Connect, "Ağ aranıyor", Ssid + " Wi-Fi listesinde aranıyor");
+        bool vis = false;
+        await Task.Run(() => { vis = NetworkVisible(); });
+        if (cancel && !running && ph == Ph.Stopped) { btn.Enabled = true; return; }
+        if (vis) { btn.Enabled = true; StartRun(); } else EnterWait();
+    }
+
+    // Ağ görünmüyor: Başlat gri, hata ekranda; ağ çıkınca otomatik açılır
+    void EnterWait()
+    {
+        running = false; step = -1; sw.Stop(); btn.Enabled = false; UpdateButton();
+        SetState(Ph.Warn, Ssid + " ağı bulunamadı", "Wi-Fi listesinde " + Ssid + " görünmüyor. Ağın menzilinde olduğundan emin ol. Görününce Başlat açılacak.");
+        Log(Ssid + " Wi-Fi listesinde yok. Bekleniyor...");
+        RefreshOverlay(); watch.Start();
+    }
+
+    async Task WatchTick()
+    {
+        if (running) { watch.Stop(); return; }
+        bool vis = false;
+        await Task.Run(() => { vis = NetworkVisible(); });
+        if (!vis || running) return;
+        watch.Stop(); btn.Enabled = true;
+        SetState(Ph.Idle, Ssid + " bulundu", "Başlat'a basarak bağlanmayı başlatabilirsin.");
+        Log(Ssid + " ağı göründü. Başlat'a basabilirsin.");
     }
 
     void StartRun()
@@ -761,6 +799,15 @@ class App : Form
             var p = Process.Start(new ProcessStartInfo("netsh", args) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, StandardOutputEncoding = System.Text.Encoding.UTF8 });
             string o = p.StandardOutput.ReadToEnd(); p.WaitForExit(); return o;
         } catch { return ""; }
+    }
+    // Hedef ağ Wi-Fi listesinde görünüyor mu?
+    static bool NetworkVisible()
+    {
+        foreach (var l in Netsh("wlan show networks").Split('\n')) {
+            var m = Regex.Match(l, @"^\s*SSID\s+\d+\s*:\s*(.+?)\s*$");
+            if (m.Success && string.Equals(m.Groups[1].Value, Ssid, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+        return false;
     }
     static string CurrentSsid()
     {
@@ -955,9 +1002,17 @@ class App : Form
                 Log("Wi-Fi kapat/aç #" + resets);
                 await Task.Run(() => ResetAdapter());
             } else {
-                SetState(Ph.Connect, Ssid + "'e bağlanılıyor", "Şu an: " + (cur ?? "bağlı değil"));
-                Log("Şu an: " + (cur ?? "bağlı değil") + " -> " + Ssid + "'e bağlanılıyor");
-                await Task.Run(() => Connect());
+                bool vis = true;
+                await Task.Run(() => { vis = NetworkVisible(); });
+                if (!running) return;
+                if (!vis) {
+                    SetState(Ph.Warn, Ssid + " ağı bulunamadı", "Wi-Fi listesinde görünmüyor, aranmaya devam ediliyor...");
+                    Log(Ssid + " listede yok, bekleniyor.");
+                } else {
+                    SetState(Ph.Connect, Ssid + "'e bağlanılıyor", "Şu an: " + (cur ?? "bağlı değil"));
+                    Log("Şu an: " + (cur ?? "bağlı değil") + " -> " + Ssid + "'e bağlanılıyor");
+                    await Task.Run(() => Connect());
+                }
             }
         } catch (Exception ex) { Log("Hata: " + ex.Message); }
         finally { busy = false; }
