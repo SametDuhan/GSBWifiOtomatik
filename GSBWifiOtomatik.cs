@@ -107,7 +107,7 @@ class Cdp : IDisposable
             Headed = headed;
             string args = (headed ? "--window-position=140,40 --window-size=1100,800" : "--headless=new --window-size=" + VW + "," + VH) + " --remote-debugging-port=" + port + " --remote-allow-origins=* --user-data-dir=\"" + profile + "\"" +
                 " --no-first-run --no-default-browser-check --disable-gpu --disable-extensions --mute-audio" +
-                " --disable-features=Translate --user-agent=\"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36\"" +
+                " --disable-sync --disable-features=Translate --user-agent=\"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36\"" +
                 (noSandbox ? " --no-sandbox" : "") + " about:blank";
             try { proc = Process.Start(new ProcessStartInfo(exe, args) { UseShellExecute = false, CreateNoWindow = true }); } catch { return false; }
             string url = WaitWs(port, 9000);
@@ -665,7 +665,11 @@ class App : Form
 {
     const string Ssid = "GSBWIFI";
     const int TickMs = 4000;
-    static readonly string PortalUrl = Environment.GetEnvironmentVariable("GSB_PORTAL") ?? "https://wifi.gsb.gov.tr/login.html";
+    static bool Demo = false;
+    // Demo sayfası, adres çubuğunda kişisel bir ad görünmesin diye ortak klasörde ("Public\kullanici") durur
+    static string DemoPath { get { return Path.Combine(Environment.GetEnvironmentVariable("PUBLIC") ?? @"C:\Users\Public", "kullanici", "login.html"); } }
+    static string PortalUrl { get { return Demo ? new Uri(DemoPath).AbsoluteUri : (Environment.GetEnvironmentVariable("GSB_PORTAL") ?? "https://wifi.gsb.gov.tr/login.html"); } }
+    const string DemoHtml = "<!doctype html><html lang=tr><meta charset=utf-8><title>Wi-Fi Giriş (Demo)</title><body style=\"font-family:Segoe UI,sans-serif;background:#f3ecd2;margin:0\"><div style=\"background:#9aa0ad;padding:28px;text-align:center;color:#6b1f1f;font:600 22px Georgia,serif\">Wi-Fi Giriş (Demo)</div><p style=\"text-align:center;color:#3d5a1f;font:600 16px Georgia,serif;margin:28px 0\">Hoşgeldiniz. İnternet erişimi için bilgilerinizi girerek 'Giriş' butonuna basınız.</p><form onsubmit=\"event.preventDefault();document.getElementById('o').textContent='Demo: giriş gönderildi';\" style=\"width:360px;margin:30px auto\"><p>Kullanıcı Adı:<br><input name=j_username style=\"font-size:18px;padding:8px;width:100%;box-sizing:border-box\"></p><p>Şifre:<br><input type=password name=j_password style=\"font-size:18px;padding:8px;width:100%;box-sizing:border-box\"></p><p><input type=submit name=submit value=\"Giriş\" style=\"font-size:18px;padding:10px;width:100%;background:#e8c547;border:1px solid #b39a2e;border-radius:22px\"></p><h3 id=o style=\"text-align:center;color:#2d6a2d\"></h3></form></body></html>";
     const string PortalPost = "https://wifi.gsb.gov.tr/j_spring_security_check";
 
     RichTextBox box; FlatBtn btn, btnHide, btnCred; Switch swView; Card card; Label logHead;
@@ -681,8 +685,9 @@ class App : Form
 
     [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool SetProcessDPIAware();
 
-    [STAThread] static void Main()
+    [STAThread] static void Main(string[] args)
     {
+        Demo = Array.IndexOf(args, "--demo") >= 0;
         try { SetProcessDPIAware(); } catch { }
         using (var gg = Graphics.FromHwnd(IntPtr.Zero)) T.S = gg.DpiX / 96f;
         ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072 | SecurityProtocolType.Tls;
@@ -741,6 +746,7 @@ class App : Form
         if (T.S != 1f) Scale(new SizeF(T.S, T.S));
         LoadSettings(); swView.Checked = viewOn;
         Shown += (s, e) => {
+            if (Demo) { RunDemo(); return; }
 #if SELFTEST
             viewOn = true; swView.Checked = true; running = true; sw.Start(); RefreshOverlay(); UpdateButton();
             if (Environment.GetEnvironmentVariable("GSB_DESKTEST") == "1") { EnsureGhost(); Task.Run(() => { bool ok = VisualWifi(true, null, null, true); Log("DESKTEST sonuç: " + ok); }); return; }
@@ -753,6 +759,25 @@ class App : Form
             var _t = TryStart();
 #endif
         };
+    }
+
+    // "--demo": gerçek ağ ve gerçek bilgi olmadan, örnek giriş sayfasında ikinci imleç gösterisi (tanıtım videosu için)
+    void RunDemo()
+    {
+        try { Directory.CreateDirectory(Path.GetDirectoryName(DemoPath)); File.WriteAllText(DemoPath, DemoHtml, new UTF8Encoding(false)); } catch (Exception ex) { Log("Demo sayfası yazılamadı: " + ex.Message); return; }
+        viewOn = true; swView.Checked = true; running = true; sw.Start(); UpdateButton(); RefreshOverlay();
+        SetState(Ph.Page, "Demo başlıyor", "Örnek giriş sayfası açılıyor");
+        Log("Demo: örnek bilgiler kullanılıyor, gerçek ağa ve gerçek hesaba dokunulmaz.");
+        Task.Run(() => {
+            Thread.Sleep(1200);
+            string r = BrowserLogin("12312312312", "demo-sifre");
+            Thread.Sleep(2500);
+            running = false; sw.Stop();
+            SetState(Ph.Done, "Demo tamamlandı", "Örnek sayfada alanlar dolduruldu ve Giriş'e tıklandı.");
+            Log("Demo bitti (" + r + ").");
+            BeginInvoke(new Action(() => { UpdateButton(); RefreshOverlay(); }));
+            Thread.Sleep(3000); CloseBrowser();
+        });
     }
 
     // ---- ayarlar ----
@@ -920,7 +945,7 @@ class App : Form
 
         // adımlar
         string[] names = { "Wi-Fi", "Giriş sayfası", "Giriş", "İnternet" };
-        float x0 = 56, x1 = sz.Width - 56, y = 164;
+        float x0 = 56, x1 = sz.Width - 56, y = 158;
         for (int i = 0; i < 3; i++)
         {
             float xa = x0 + (x1 - x0) * i / 3f + 12, xb = x0 + (x1 - x0) * (i + 1) / 3f - 12;
@@ -949,12 +974,17 @@ class App : Form
         // sayaçlar
         var el = sw.Elapsed; string time = ((int)el.TotalMinutes).ToString("00") + ":" + el.Seconds.ToString("00");
         string[] lab = { "DENEME", "WI-FI YENİLEME", "SÜRE" }, val = { attempts.ToString(), resets.ToString(), time };
-        float cw = (sz.Width - 40) / 3f;
+        float gap = 10, bw = (sz.Width - 48 - gap * 2) / 3f;
         for (int i = 0; i < 3; i++)
         {
-            float x = 24 + cw * i;
-            T.Tx(g, lab[i], 8.5f, true, Color.FromArgb(190, 200, 220), x, 207, cw, 16, 0, false, false);
-            T.Tx(g, val[i], 14f, true, T.Text, x, 222, cw, 26, 0, false, false);
+            var box = new RectangleF(24 + (bw + gap) * i, 203, bw, 41);
+            using (var p = T.Round(box, 10))
+            {
+                using (var b = new SolidBrush(Color.FromArgb(150, 10, 15, 28))) g.FillPath(b, p);
+                using (var pen = new Pen(Color.FromArgb(120, 70, 86, 120), 1.2f)) g.DrawPath(pen, p);
+            }
+            T.Tx(g, lab[i], 8f, true, Color.FromArgb(185, 196, 218), box.X + 14, box.Y + 5, bw - 20, 14, 0, false, false);
+            T.Tx(g, val[i], 13f, true, T.Text, box.X + 14, box.Y + 18, bw - 20, 22, 0, false, false);
         }
     }
 

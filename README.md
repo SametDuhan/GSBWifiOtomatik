@@ -55,6 +55,10 @@ Chrome bulunamazsa Edge, o da yoksa doğrudan form gönderimi denenir.
 - **Yönetici izni**: Wi-Fi kartını kapatıp açmak için gerekir. Uygulama her açılışta Windows'un izin penceresini gösterir.
 - Ek bir şey yok. Uygulama Windows ile gelen .NET Framework 4 üzerinde çalışır.
 
+## Demo (tanıtım videosu için)
+
+`GSBWifiOtomatik.exe --demo` komutuyla, gerçek ağa ve gerçek hesaba dokunmadan örnek bir giriş sayfasında ikinci imleç gösterisi çalışır. Örnek sayfa adres çubuğunda kişisel bir ad göstermeyecek şekilde `C:\Users\Public\kullanici\login.html` yoluna yazılır. Kullanıcı adı olarak örnek bir değer (`12312312312`) kullanılır ve alanlardaki yazı zaten noktayla maskelenir.
+
 ## Giriş bilgileri
 
 İlk açılışta iki seçenek sorulur (**Giriş bilgileri** düğmesinden sonradan değiştirilir):
