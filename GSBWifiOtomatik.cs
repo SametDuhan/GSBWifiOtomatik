@@ -21,7 +21,7 @@ using System.Management;
 // ============================================================================
 //  GSBWIFI Otomatik Bağlantı
 //  - Ağa bağlanır, "internet yok" olursa Wi-Fi kartını kapatıp açar
-//  - Giriş sayfasını Chrome'da açar (başsız), bilgileri yazar, "Giriş"e tıklar
+//  - Giriş sayfasını Windows kendisi Chrome'da açar; uygulama sadece sayfa gelene kadar kapat/aç döngüsünü sürdürür
 //  - İstenirse sağ altta canlı görünüm: ikinci bir sanal imleç + ekran görüntüsü
 //    (gerçek fare imleci kullanılmaz, senin farene dokunulmaz)
 // ============================================================================
@@ -585,6 +585,80 @@ static class Desk
     [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)] static extern int GetClassName(IntPtr h, StringBuilder sb, int n);
     public static string LastSeen = "";
 
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder sb, int n);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern void mouse_event(int flags, int dx, int dy, int data, int extra);
+    static readonly Regex PortalTitleRx = new Regex(@"gsb|giriş|login|wi-?fi|oturum|sign.?in|connecttest", RegexOptions.IgnoreCase);
+    static readonly Regex LinkRx = new Regex(@"web|site|sayfa|tarayıcı|browser|sign|oturum|giriş|login|portal|aç\b|open|click|tıkla", RegexOptions.IgnoreCase);
+    static readonly Regex ExpandRx = new Regex(@"ağlarını yönet|bağlantılarını yönet|manage wi-?fi|wi-?fi connections|kullanılabilir|available", RegexOptions.IgnoreCase);
+
+    // Chrome/Edge pencerelerinin başlıkları (tutamaç -> başlık)
+    public static Dictionary<IntPtr, string> BrowserWindows()
+    {
+        var d = new Dictionary<IntPtr, string>();
+        EnumWindows((h, l) =>
+        {
+            if (!IsWindowVisible(h)) return true;
+            var cn = new StringBuilder(128); GetClassName(h, cn, 128);
+            if (cn.ToString() != "Chrome_WidgetWin_1") return true;
+            var tt = new StringBuilder(512); GetWindowText(h, tt, 512);
+            if (tt.Length > 0) d[h] = tt.ToString();
+            return true;
+        }, IntPtr.Zero);
+        return d;
+    }
+    // Giriş formu bir tarayıcı penceresinde açık mı? (başlığı formu gösteriyor ya da bizden önce olmayan yeni pencere)
+    public static bool PortalOpen(Dictionary<IntPtr, string> before, out string title)
+    {
+        title = "";
+        foreach (var kv in BrowserWindows())
+        {
+            string t = Regex.Replace(kv.Value, @"\s+-\s+(Google Chrome|Microsoft.? Edge).*$", "");
+            if (PortalTitleRx.IsMatch(t) || !before.ContainsKey(kv.Key)) { title = kv.Value; return true; }
+        }
+        return false;
+    }
+
+    static void Click(System.Windows.Automation.AutomationElement e)
+    {
+        try { Press(e); return; } catch { }
+        var c = Center(e); SetCursorPos(c.X, c.Y); Thread.Sleep(80); mouse_event(2, 0, 0, 0, 0); mouse_event(4, 0, 0, 0, 0);
+    }
+
+    // Hızlı ayarlar panelinde ağın altındaki mavi bağlantıyı bulur; yoksa Wi-Fi listesini açıp tekrar bakar. Bulursa tıklar.
+    public static bool ClickPortalLink(out string info)
+    {
+        info = "";
+        var AEc = System.Windows.Automation.AutomationElement.ControlTypeProperty;
+        for (int round = 0; round < 3; round++)
+        {
+            string seen; var wins = CornerWindows(out seen); LastSeen = seen;
+            var names = new StringBuilder();
+            foreach (var h in wins)
+            {
+                System.Windows.Automation.AutomationElement w; try { w = System.Windows.Automation.AutomationElement.FromHandle(h); } catch { continue; }
+                System.Windows.Automation.AutomationElement expand = null;
+                foreach (System.Windows.Automation.AutomationElement e in w.FindAll(System.Windows.Automation.TreeScope.Descendants, System.Windows.Automation.Condition.TrueCondition))
+                {
+                    try
+                    {
+                        var ec = e.Current; if (ec.BoundingRectangle.IsEmpty) continue;
+                        string n = ec.Name ?? ""; var ct = ec.ControlType;
+                        if (n.Length > 0 && names.Length < 600) names.Append(ct.ProgrammaticName.Replace("ControlType.", "")).Append(':').Append(n).Append(" | ");
+                        if (ct == System.Windows.Automation.ControlType.Hyperlink && n.Length > 0) { Click(e); info = "bağlantı: " + n; return true; }
+                        if ((ct == System.Windows.Automation.ControlType.Button || ct == System.Windows.Automation.ControlType.Text) && n.Length > 0 && n.Length < 80 && LinkRx.IsMatch(n) && !TileRx.IsMatch(n) && !ExpandRx.IsMatch(n)) { Click(e); info = "bağlantı: " + n; return true; }
+                        if (expand == null && ct == System.Windows.Automation.ControlType.Button && ExpandRx.IsMatch(n)) expand = e;
+                    }
+                    catch { }
+                }
+                if (expand != null && round == 0) { try { Click(expand); } catch { } Thread.Sleep(900); goto next; }
+            }
+            info = "görülen öğeler: " + names; if (round == 2) break;
+            next: Thread.Sleep(400);
+        }
+        return false;
+    }
+
     // Ekranın sağ alt köşesindeki (hızlı ayarlar paneli olabilecek) pencereler
     static List<IntPtr> CornerWindows(out string seen)
     {
@@ -937,7 +1011,7 @@ class App : Form
     void StartRun()
     {
         running = true; cancel = false; done = false; loginFails = 0;
-        sw.Start(); UpdateButton(); Log("Başladı. Hedef: " + Ssid);
+        sw.Start(); UpdateButton(); Log("Başladı. Hedef: " + Ssid + " (sürüm: kapat/aç döngüsü, kendi giriş denemesi yok)");
         SetState(Ph.Connect, "Başlıyor", Ssid + " kontrol ediliyor");
         RefreshOverlay();
         timer.Start(); var _ = Tick();
@@ -1423,6 +1497,65 @@ if($was){'WAS_OFF'}
     }
     static void Connect() { EnsureProfile(); Netsh("wlan connect name=\"" + Ssid + "\" ssid=\"" + Ssid + "\""); }
 
+    // Giriş formu (captive portal) geldi: Windows onu Chrome'da kendisi açar, uygulama işini bitirir.
+    async Task FormReady()
+    {
+        done = true; timer.Stop();
+        // Önce Windows/Chrome formu kendisi açıyor mu diye beklenir; açarsa hiçbir şeye tıklanmaz.
+        var before = new Dictionary<IntPtr, string>(); string title = ""; bool open = false, clicked = false;
+        SetState(Ph.Page, "Giriş sayfası bekleniyor", "Chrome formu kendisi açarsa dokunulmaz");
+        await Task.Run(() => {
+            before = Desk.BrowserWindows();
+            for (int i = 0; i < 16 && !open && !cancel; i++) { Thread.Sleep(500); open = Desk.PortalOpen(before, out title); }
+        });
+        if (!open && !cancel)
+        {
+            SetState(Ph.Page, "Form açılmadı, panelden açılıyor", "Wi-Fi panelindeki mavi bağlantıya tıklanıyor");
+            Log("Chrome formu açmadı. Wi-Fi panelindeki bağlantıya tıklanıyor.");
+            for (int k = 0; k < 2 && !open && !cancel; k++)
+            {
+                string info = "";
+                await Task.Run(() => {
+                    var tb = Desk.FindTrayButton();
+                    if (tb == null) { info = "Görev çubuğunda Wi-Fi simgesi bulunamadı"; return; }
+                    try { Desk.Press(tb); } catch (Exception ex) { info = "simge tıklanamadı: " + ex.Message; return; }
+                    Thread.Sleep(900);
+                    clicked = Desk.ClickPortalLink(out info);
+                    if (clicked) for (int i = 0; i < 20 && !open; i++) { Thread.Sleep(500); open = Desk.PortalOpen(before, out title); }
+                    Desk.Esc();
+                });
+                Log(clicked ? "Panel " + info : "Panelde bağlantı bulunamadı (" + info + ")");
+            }
+        }
+        sw.Stop();
+        if (open) { SetState(Ph.Done, "Giriş sayfası açık", "Pencere birkaç saniye sonra kapanacak."); Log("Giriş formu açık: " + title); }
+        else { SetState(Ph.Warn, "Form açılamadı", "Giriş sayfası gelmişti ama Chrome'da açılmadı. Hata kaydına bak ya da panelden bağlantıya elle tıkla."); Log("Form açılmadı."); await Task.Delay(1000); StopRun(); return; }
+        tray.BalloonTipTitle = "GSBWIFI"; tray.BalloonTipText = "Giriş sayfası açık."; tray.ShowBalloonTip(3000);
+        await Task.Delay(5000); Close();
+    }
+
+    // Ağ giriş sayfasına yönlendiriyor mu? (internet yok + yönlendirme yok = "internet yok, açık" takılması)
+    static bool PortalPresent()
+    {
+        try {
+            var r = (HttpWebRequest)WebRequest.Create("http://www.msftconnecttest.com/connecttest.txt");
+            r.Timeout = 3000; r.AllowAutoRedirect = false; r.Proxy = null;
+            using (var resp = (HttpWebResponse)r.GetResponse()) using (var sr = new StreamReader(resp.GetResponseStream()))
+                { int c = (int)resp.StatusCode; string body = sr.ReadToEnd(); if (c >= 300 && c < 400) return true; if (body.Contains("j_username") || body.IndexOf("gsb.gov.tr", StringComparison.OrdinalIgnoreCase) >= 0) return true; }
+        }
+        catch (WebException ex) {
+            var hr = ex.Response as HttpWebResponse;
+            if (hr != null) { int c = (int)hr.StatusCode; if (c >= 300 && c < 400) return true; }
+        }
+        catch { }
+        try {
+            var r = (HttpWebRequest)WebRequest.Create(PortalUrl);
+            r.Timeout = 3000; r.Proxy = null;
+            using (var resp = (HttpWebResponse)r.GetResponse()) using (var sr = new StreamReader(resp.GetResponseStream()))
+                return sr.ReadToEnd().Contains("j_username");
+        } catch { return false; }
+    }
+
     async Task Finish()
     {
         done = true; timer.Stop(); sw.Stop();
@@ -1443,33 +1576,14 @@ if($was){'WAS_OFF'}
             if (!running) return;
             if (cur == Ssid) {
                 if (ok) { await Finish(); return; }
-                string u = null, p = null;
-                if (credMode != "chrome" && !LoadCred(out u, out p)) {
-                    SetState(Ph.Warn, "Giriş bilgisi gerekli", "'Giriş bilgileri' düğmesinden kullanıcı adı ve şifreni gir.");
-                    Log("Kayıtlı giriş bilgisi yok."); return;
-                }
+                // Giriş formunu Windows kendisi Chrome'da açar; uygulama açmaz. Form gelmediyse Wi-Fi kapat/aç döngüsü sürer.
                 attempts++;
-                SetState(Ph.Page, "İnternet yok, giriş sayfasına bakılıyor", Ssid + " bağlı ama internet gelmedi");
-                string res = null;
-                await Task.Run(() => { res = BrowserLogin(u, p); if (res == "nochrome" && u != null) { Log("Chrome bulunamadı, doğrudan giriş deneniyor."); res = HttpLogin(u, p); } });
+                SetState(Ph.Page, "İnternet yok, giriş sayfası bekleniyor", Ssid + " bağlı ama internet gelmedi");
+                bool portal = false;
+                await Task.Run(() => { portal = PortalPresent(); });
                 if (!running) return;
-                if (res == "ok") { await Finish(); return; }
-                if (res == "cancel") return;
-                if (res == "noautofill" || (res == "nochrome" && credMode == "chrome")) {
-                    StopRun();
-                    SetState(Ph.Warn, "Bilgiler otomatik dolmadı", "Chrome kayıtlı bilgileri getirmedi. 'Giriş bilgileri'nden bilgilerini elle gir.");
-                    Log("Chrome'da kayıtlı bilgiler bulunamadı, bilgileri elle girmen gerek."); return;
-                }
-                if (res == "failed") {
-                    loginFails++; Log("Giriş gönderildi ama internet gelmedi (" + loginFails + ").");
-                    if (loginFails >= 4) {
-                        StopRun();
-                        SetState(Ph.Warn, "Giriş sonuç vermedi", "Giriş 4 kez denendi ama internet gelmedi. Bilgiler yanlış ya da hesap bloke olabilir. Kontrol edip Başlat'a bas.");
-                        Log("Hesabı kilitlememek için duruldu: giriş 4 kez başarısız.");
-                        return;
-                    }
-                }
-                else Log("Giriş sayfası açılmadı.");
+                if (portal) { await FormReady(); return; }
+                Log("Giriş sayfası gelmedi (\"internet yok, açık\").");
                 resets++;
                 SetState(Ph.Reset, "Wi-Fi kapatılıp açılıyor", "Sayfa açılana kadar yeniden denenecek (#" + resets + ")");
                 Log("Wi-Fi kapat/aç #" + resets);
