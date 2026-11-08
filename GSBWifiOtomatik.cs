@@ -762,7 +762,7 @@ static class Desk
 class App : Form
 {
     const string Ssid = "GSBWIFI";
-    const int TickMs = 4000;
+    const int TickMs = 700;
     static bool Demo = false;
     // Demo sayfası, adres çubuğunda kişisel bir ad görünmesin diye ortak klasörde ("Public\kullanici") durur
     static string DemoPath { get { return Path.Combine(Environment.GetEnvironmentVariable("PUBLIC") ?? @"C:\Users\Public", "kullanici", "login.html"); } }
@@ -1192,13 +1192,13 @@ class App : Form
     {
         try {
             var r = (HttpWebRequest)WebRequest.Create("http://www.msftconnecttest.com/connecttest.txt");
-            r.Timeout = 2500; r.AllowAutoRedirect = false; r.Proxy = null;
+            r.Timeout = 1000; r.AllowAutoRedirect = false; r.Proxy = null;
             using (var resp = r.GetResponse()) using (var sr = new StreamReader(resp.GetResponseStream()))
                 if (sr.ReadToEnd().Trim() == "Microsoft Connect Test") return true;
         } catch { }
         try {
             var r = (HttpWebRequest)WebRequest.Create("http://clients3.google.com/generate_204");
-            r.Timeout = 2500; r.AllowAutoRedirect = false; r.Proxy = null;
+            r.Timeout = 1000; r.AllowAutoRedirect = false; r.Proxy = null;
             using (var resp = (HttpWebResponse)r.GetResponse()) return resp.StatusCode == HttpStatusCode.NoContent;
         } catch { return false; }
     }
@@ -1490,12 +1490,15 @@ if($was){'WAS_OFF'}
     static void ResetAdapter()
     {
         DisableAdapter();
-        Thread.Sleep(3000);
+        Thread.Sleep(600);
         EnableAdapter();
-        Thread.Sleep(5000);
+        Thread.Sleep(1200);
         Connect();
     }
-    static void Connect() { EnsureProfile(); Netsh("wlan connect name=\"" + Ssid + "\" ssid=\"" + Ssid + "\""); }
+    static volatile int lastConnect = 0;
+    // Wi-Fi panelindeki "Bağlantıyı Kes" ile aynı: ağdan düşer, hemen yeniden bağlanır (radyo kapatılmaz).
+    static void Reconnect() { Netsh("wlan disconnect"); Thread.Sleep(300); Connect(); }
+    static void Connect() { lastConnect = Environment.TickCount; EnsureProfile(); Netsh("wlan connect name=\"" + Ssid + "\" ssid=\"" + Ssid + "\""); }
 
     // Giriş formu (captive portal) geldi: Windows onu Chrome'da kendisi açar, uygulama işini bitirir.
     // true: form açıldı, iş bitti. false: form açılamadı; çağıran Wi-Fi kapat/aç döngüsüne devam eder.
@@ -1542,7 +1545,7 @@ if($was){'WAS_OFF'}
     {
         try {
             var r = (HttpWebRequest)WebRequest.Create("http://www.msftconnecttest.com/connecttest.txt");
-            r.Timeout = 3000; r.AllowAutoRedirect = false; r.Proxy = null;
+            r.Timeout = 1000; r.AllowAutoRedirect = false; r.Proxy = null;
             using (var resp = (HttpWebResponse)r.GetResponse()) using (var sr = new StreamReader(resp.GetResponseStream()))
                 { int c = (int)resp.StatusCode; string body = sr.ReadToEnd(); if (c >= 300 && c < 400) return true; if (body.Contains("j_username") || body.IndexOf("gsb.gov.tr", StringComparison.OrdinalIgnoreCase) >= 0) return true; }
         }
@@ -1551,12 +1554,8 @@ if($was){'WAS_OFF'}
             if (hr != null) { int c = (int)hr.StatusCode; if (c >= 300 && c < 400) return true; }
         }
         catch { }
-        try {
-            var r = (HttpWebRequest)WebRequest.Create(PortalUrl);
-            r.Timeout = 3000; r.Proxy = null;
-            using (var resp = (HttpWebResponse)r.GetResponse()) using (var sr = new StreamReader(resp.GetResponseStream()))
-                return sr.ReadToEnd().Contains("j_username");
-        } catch { return false; }
+        // Giriş sayfası yerel ağdan doğrudan açılabilse bile Windows yönlendirme yapmıyorsa ("internet yok, açık") sayfa yok sayılır.
+        return false;
     }
 
     async Task Finish()
@@ -1580,6 +1579,7 @@ if($was){'WAS_OFF'}
             if (cur == Ssid) {
                 if (ok) { await Finish(); return; }
                 // Giriş formunu Windows kendisi Chrome'da açar; uygulama açmaz. Form gelmediyse Wi-Fi kapat/aç döngüsü sürer.
+                if (unchecked(Environment.TickCount - lastConnect) < 3000) return; // bağlanma/IP alma payı
                 attempts++;
                 SetState(Ph.Page, "İnternet yok, giriş sayfası bekleniyor", Ssid + " bağlı ama internet gelmedi");
                 bool portal = false;
@@ -1588,12 +1588,16 @@ if($was){'WAS_OFF'}
                 if (portal) { if (await FormReady()) return; if (!running) return; Log("Giriş sayfası Chrome'da açılmadı (\"internet yok, açık\")."); }
                 else Log("Giriş sayfası gelmedi (\"internet yok, açık\").");
                 resets++;
-                SetState(Ph.Reset, "Wi-Fi kapatılıp açılıyor", "Sayfa açılana kadar yeniden denenecek (#" + resets + ")");
-                Log("Wi-Fi kapat/aç #" + resets);
-                await Task.Run(() => {
-                    if (viewOn && VisualWifi(true, DisableAdapter, EnableAdapter)) { EnsureWifiOn(); Thread.Sleep(5000); Connect(); }
-                    else { EnsureWifiOn(); ResetAdapter(); }
-                });
+                // İlk 2 deneme: Bağlantıyı Kes + yeniden bağlan. Olmazsa bundan sonra hep Wi-Fi'ı kapatıp açar.
+                if (resets <= 2) {
+                    SetState(Ph.Reset, "Bağlantı kesilip yeniden bağlanılıyor", "Sayfa açılana kadar yeniden denenecek (#" + resets + ")");
+                    Log("Bağlantıyı kes + yeniden bağlan #" + resets);
+                    await Task.Run(() => Reconnect());
+                } else {
+                    SetState(Ph.Reset, "Wi-Fi kapatılıp açılıyor", "Sayfa açılana kadar yeniden denenecek (#" + resets + ")");
+                    Log("Wi-Fi kapat/aç #" + resets);
+                    await Task.Run(() => ResetAdapter());
+                }
             } else {
                 bool vis = true;
                 await Task.Run(() => { vis = NetworkVisible(); });
@@ -1604,6 +1608,8 @@ if($was){'WAS_OFF'}
                     Log(Ssid + " listede yok, bekleniyor.");
                 } else {
                     SetState(Ph.Connect, Ssid + "'e bağlanılıyor", "Şu an: " + (cur ?? "bağlı değil"));
+                    // Bağlanma sürerken tekrar tekrar komut göndermek Windows'u her seferinde baştan başlatır; bağlantıya süre tanınır.
+                    if (unchecked(Environment.TickCount - lastConnect) < 6000) return;
                     Log("Şu an: " + (cur ?? "bağlı değil") + " -> " + Ssid + "'e bağlanılıyor");
                     await Task.Run(() => Connect());
                 }
