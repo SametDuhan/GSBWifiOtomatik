@@ -1498,7 +1498,8 @@ if($was){'WAS_OFF'}
     static void Connect() { EnsureProfile(); Netsh("wlan connect name=\"" + Ssid + "\" ssid=\"" + Ssid + "\""); }
 
     // Giriş formu (captive portal) geldi: Windows onu Chrome'da kendisi açar, uygulama işini bitirir.
-    async Task FormReady()
+    // true: form açıldı, iş bitti. false: form açılamadı; çağıran Wi-Fi kapat/aç döngüsüne devam eder.
+    async Task<bool> FormReady()
     {
         done = true; timer.Stop();
         // Önce Windows/Chrome formu kendisi açıyor mu diye beklenir; açarsa hiçbir şeye tıklanmaz.
@@ -1529,9 +1530,11 @@ if($was){'WAS_OFF'}
         }
         sw.Stop();
         if (open) { SetState(Ph.Done, "Giriş sayfası açık", "Pencere birkaç saniye sonra kapanacak."); Log("Giriş formu açık: " + title); }
-        else { SetState(Ph.Warn, "Form açılamadı", "Giriş sayfası gelmişti ama Chrome'da açılmadı. Hata kaydına bak ya da panelden bağlantıya elle tıkla."); Log("Form açılmadı."); await Task.Delay(1000); StopRun(); return; }
+        else if (cancel || !running) return true;
+        else { Log("Form açılmadı, Wi-Fi kapat/aç ile yeniden denenecek."); done = false; sw.Start(); timer.Start(); return false; }
         tray.BalloonTipTitle = "GSBWIFI"; tray.BalloonTipText = "Giriş sayfası açık."; tray.ShowBalloonTip(3000);
         await Task.Delay(5000); Close();
+        return true;
     }
 
     // Ağ giriş sayfasına yönlendiriyor mu? (internet yok + yönlendirme yok = "internet yok, açık" takılması)
@@ -1582,8 +1585,8 @@ if($was){'WAS_OFF'}
                 bool portal = false;
                 await Task.Run(() => { portal = PortalPresent(); });
                 if (!running) return;
-                if (portal) { await FormReady(); return; }
-                Log("Giriş sayfası gelmedi (\"internet yok, açık\").");
+                if (portal) { if (await FormReady()) return; if (!running) return; Log("Giriş sayfası Chrome'da açılmadı (\"internet yok, açık\")."); }
+                else Log("Giriş sayfası gelmedi (\"internet yok, açık\").");
                 resets++;
                 SetState(Ph.Reset, "Wi-Fi kapatılıp açılıyor", "Sayfa açılana kadar yeniden denenecek (#" + resets + ")");
                 Log("Wi-Fi kapat/aç #" + resets);
